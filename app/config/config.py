@@ -6,7 +6,8 @@ import toml
 from loguru import logger
 
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-config_file = f"{root_dir}/config.toml"
+# Override with MPT_CONFIG_FILE to point at a persistent disk (e.g. on Render)
+config_file = os.getenv("MPT_CONFIG_FILE", f"{root_dir}/config.toml")
 _CONTAINER_CGROUP_MARKERS = ("docker", "containerd", "kubepods", "libpod", "podman")
 _DOCKER_HOST_GATEWAY_NAME = "host.docker.internal"
 

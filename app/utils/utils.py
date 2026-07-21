@@ -70,7 +70,8 @@ def root_dir():
 
 
 def storage_dir(sub_dir: str = "", create: bool = False):
-    d = os.path.join(root_dir(), "storage")
+    # Override with MPT_STORAGE_DIR to point at a persistent disk (e.g. on Render)
+    d = os.getenv("MPT_STORAGE_DIR", os.path.join(root_dir(), "storage"))
     if sub_dir:
         d = os.path.join(d, sub_dir)
     if create and not os.path.exists(d):
