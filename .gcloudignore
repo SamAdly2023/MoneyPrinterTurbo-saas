@@ -1,0 +1,12 @@
+.gcloudignore
+.git
+.gitignore
+.venv/
+venv/
+storage/
+__pycache__/
+*.pyc
+.idea/
+.vscode/
+test/
+docs/
