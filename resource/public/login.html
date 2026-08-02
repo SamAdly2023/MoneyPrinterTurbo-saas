@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sign in - MoneyPrinter Studio</title>
+<style>
+  :root{
+    --bg:#0b0f19; --panel:#141b2d; --border:#232d45; --text:#e7ecf5; --muted:#8b98b5;
+    --accent:#6c5ce7; --grad:linear-gradient(135deg,#6c5ce7,#a06bff); --red:#ef4444; --green:#22c55e;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%}
+  body{
+    background:radial-gradient(1200px 600px at 80% -10%,rgba(108,92,231,.18),transparent 60%),var(--bg);
+    color:var(--text); font-family:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+    display:flex;align-items:center;justify-content:center;min-height:100vh;
+  }
+  .card{
+    width:360px;background:var(--panel);border:1px solid var(--border);border-radius:16px;
+    padding:32px 28px;box-shadow:0 10px 30px rgba(0,0,0,.35);
+  }
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--grad);display:grid;place-items:center;
+    font-size:22px;margin-bottom:16px;}
+  h1{font-size:18px;margin:0 0 4px}
+  p.sub{margin:0 0 22px;color:var(--muted);font-size:13px}
+  label{display:block;font-size:12.5px;color:var(--muted);margin:14px 0 6px;font-weight:600}
+  input{
+    width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);
+    background:#0f1524;color:var(--text);font-size:14px;
+  }
+  input:focus{outline:none;border-color:var(--accent)}
+  button{cursor:pointer;font-family:inherit}
+  .btn-primary{
+    width:100%;margin-top:22px;padding:11px;border:none;border-radius:11px;
+    background:var(--grad);color:#fff;font-weight:700;font-size:14px;
+  }
+  .btn-primary:hover{filter:brightness(1.08)}
+  .btn-primary:disabled{opacity:.6;cursor:default}
+  .btn-google{
+    width:100%;padding:11px;border:1px solid var(--border);border-radius:11px;background:#0f1524;
+    color:var(--text);font-weight:600;font-size:14px;display:flex;align-items:center;justify-content:center;gap:10px;
+  }
+  .btn-google:hover{background:#171f33}
+  .divider{display:flex;align-items:center;gap:10px;margin:20px 0;color:var(--muted);font-size:12px}
+  .divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--border)}
+  .error{margin-top:14px;font-size:13px;color:var(--red);display:none}
+  .switch-mode{margin-top:18px;text-align:center;font-size:13px;color:var(--muted)}
+  .switch-mode a{color:var(--accent);font-weight:600;cursor:pointer;text-decoration:none}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">🎬</div>
+    <h1>MoneyPrinter Studio</h1>
+    <p class="sub" id="mode-sub">Sign in to continue</p>
+
+    <button class="btn-google" id="google-btn">
+      <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.9c1.7-1.57 2.7-3.87 2.7-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.9-2.26c-.8.54-1.84.86-3.06.86-2.35 0-4.34-1.59-5.05-3.72H.98v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.95 10.7A5.4 5.4 0 0 1 3.67 9c0-.59.1-1.17.28-1.7V4.97H.98A9 9 0 0 0 0 9c0 1.45.35 2.83.98 4.03z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.9 11.43 0 9 0A9 9 0 0 0 .98 4.97L3.95 7.3C4.66 5.17 6.65 3.58 9 3.58z"/></svg>
+      Continue with Google
+    </button>
+
+    <div class="divider">or</div>
+
+    <form id="pw-form">
+      <label>Email</label>
+      <input type="email" id="email" autocomplete="email" required autofocus />
+      <label>Password</label>
+      <input type="password" id="password" autocomplete="current-password" required minlength="6" />
+      <button type="submit" class="btn-primary" id="submit-btn">Sign in</button>
+    </form>
+    <div class="error" id="error"></div>
+    <div class="switch-mode">
+      <span id="switch-text">Don't have an account?</span> <a id="switch-link">Sign up</a>
+    </div>
+  </div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script>
+firebase.initializeApp({
+  apiKey: "AIzaSyDJ2wY-RzJWrGR4HSfnr9GGQDpoXqqHgus",
+  authDomain: "vvvvv-504116.firebaseapp.com",
+  projectId: "vvvvv-504116",
+  appId: "1:658768852488:web:9db6e9c94f87f544f683bd",
+});
+
+const $ = s => document.querySelector(s);
+let signUpMode = false;
+
+function showError(msg){
+  const e = $("#error");
+  e.textContent = msg;
+  e.style.display = msg ? "block" : "none";
+}
+
+async function completeSignIn(user){
+  const idToken = await user.getIdToken();
+  const r = await fetch("/api/v1/auth/session", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({id_token: idToken}),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || (j.status && j.status >= 400)) {
+    throw new Error(j.message || "sign-in failed");
+  }
+  window.location.href = "/";
+}
+
+$("#google-btn").onclick = async () => {
+  showError("");
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    const result = await firebase.auth().signInWithPopup(provider);
+    await completeSignIn(result.user);
+  } catch (e) {
+    showError(e.message || String(e));
+  }
+};
+
+$("#pw-form").onsubmit = async (ev) => {
+  ev.preventDefault();
+  showError("");
+  const email = $("#email").value.trim();
+  const password = $("#password").value;
+  const btn = $("#submit-btn");
+  btn.disabled = true;
+  btn.textContent = signUpMode ? "Creating account…" : "Signing in…";
+  try {
+    const result = signUpMode
+      ? await firebase.auth().createUserWithEmailAndPassword(email, password)
+      : await firebase.auth().signInWithEmailAndPassword(email, password);
+    await completeSignIn(result.user);
+  } catch (e) {
+    showError(e.message || String(e));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = signUpMode ? "Sign up" : "Sign in";
+  }
+};
+
+$("#switch-link").onclick = () => {
+  signUpMode = !signUpMode;
+  showError("");
+  $("#mode-sub").textContent = signUpMode ? "Create your account" : "Sign in to continue";
+  $("#submit-btn").textContent = signUpMode ? "Sign up" : "Sign in";
+  $("#password").autocomplete = signUpMode ? "new-password" : "current-password";
+  $("#switch-text").textContent = signUpMode ? "Already have an account?" : "Don't have an account?";
+  $("#switch-link").textContent = signUpMode ? "Sign in" : "Sign up";
+};
+
+// Deliberately no auto-login-on-load: /logout should always land you back
+// on a form that requires an explicit action, even if the Firebase client
+// SDK still has a cached session in this browser.
+</script>
+</body>
+</html>

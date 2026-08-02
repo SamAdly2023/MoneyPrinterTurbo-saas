@@ -1,19 +1,28 @@
-"""Single-user login gate for the SaaS dashboard.
+"""Multi-user Firebase-backed auth for the SaaS dashboard.
 
-Hardcoded credentials on purpose: this app has no user database, it's meant
-for one operator. The session secret is generated once and persisted to
-config.toml so cookies survive restarts.
+A verified Firebase ID token is exchanged once (POST /api/v1/auth/session)
+for our own signed session cookie carrying just the uid. Authorization
+facts (email, is_admin, is_disabled) are always re-derived live from
+Firestore on every request rather than trusted from the cookie payload -
+that's what lets an admin disable an abusive account and have it take
+effect immediately instead of waiting out a 30-day cookie.
+
+Keeping the cookie (rather than switching to a Bearer-token scheme) is
+deliberate: plain <video>/<img> tags under /media and /tasks rely on the
+browser sending it automatically, which a header-based scheme can't do.
 """
 
-import hmac
 import secrets
 
+from fastapi import Request
+from firebase_admin import auth as firebase_auth
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from app.config import config
+from app.services import firebase_init  # noqa: F401 - ensures app is initialized first
+from app.services import firestore_db
 
-_ADMIN_USERNAMES = {"admin", "samadly728@gmail.com"}
-_ADMIN_PASSWORD = "samadly728@gmail.com"
+ADMIN_EMAILS = {"samadly728@gmail.com"}
 
 COOKIE_NAME = "mpt_auth"
 MAX_AGE = 60 * 60 * 24 * 30  # 30 days
@@ -31,24 +40,40 @@ def _get_session_secret() -> str:
 _serializer = URLSafeTimedSerializer(_get_session_secret())
 
 
-def verify_credentials(username: str, password: str) -> bool:
-    username = (username or "").strip().lower()
-    username_ok = any(
-        hmac.compare_digest(username, u) for u in _ADMIN_USERNAMES
-    )
-    password_ok = hmac.compare_digest(password or "", _ADMIN_PASSWORD)
-    return username_ok and password_ok
+def verify_id_token(id_token: str) -> dict:
+    """Verify a Firebase ID token. Returns {uid, email, provider}. Raises on failure."""
+    decoded = firebase_auth.verify_id_token(id_token)
+    uid = decoded["uid"]
+    email = (decoded.get("email") or "").lower()
+    provider = decoded.get("firebase", {}).get("sign_in_provider", "unknown")
+    return {"uid": uid, "email": email, "provider": provider}
 
 
-def create_auth_cookie_value(username: str) -> str:
-    return _serializer.dumps({"user": username})
+def create_auth_cookie_value(uid: str) -> str:
+    return _serializer.dumps({"uid": uid})
 
 
-def verify_auth_cookie(value: str) -> bool:
+def _decode_cookie(value: str) -> str | None:
     if not value:
-        return False
+        return None
     try:
-        _serializer.loads(value, max_age=MAX_AGE)
-        return True
+        payload = _serializer.loads(value, max_age=MAX_AGE)
     except (BadSignature, SignatureExpired):
-        return False
+        return None
+    return payload.get("uid")
+
+
+def get_current_user(request: Request) -> dict | None:
+    """Return {uid, email, is_admin} for the request's session, or None.
+
+    Re-reads is_disabled/email from Firestore on every call by design (see
+    module docstring) - a disabled account loses access immediately.
+    """
+    uid = _decode_cookie(request.cookies.get(COOKIE_NAME))
+    if not uid:
+        return None
+    user = firestore_db.get_user(uid)
+    if not user or user.get("is_disabled"):
+        return None
+    email = (user.get("email") or "").lower()
+    return {"uid": uid, "email": email, "is_admin": email in ADMIN_EMAILS}

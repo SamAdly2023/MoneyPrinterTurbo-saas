@@ -1,31 +1,27 @@
 """
-Direct social publishing (no third-party aggregator).
+Direct social publishing (no third-party aggregator), per user.
 
 - YouTube: full OAuth 2.0 + resumable upload via the YouTube Data API v3.
-  Works locally and is free within the daily quota.
 - TikTok: OAuth 2.0 + Content Posting API "upload to inbox" (drafts). Direct
   auto-posting requires TikTok to audit your app; until then videos land in
   your TikTok drafts and you tap "Post" in the app.
 
-Only the `requests` library is used, so no Google/TikTok SDKs are required.
-OAuth client credentials come from Settings (config.toml); tokens are stored
-locally in storage/saas/social.json (private to this machine).
+OAuth client credentials and tokens are read/written straight from each
+user's Firestore document (never the shared `config` globals) - these
+functions can be called from a normal HTTP request at any time, potentially
+concurrently with the engine processing a *different* user's job, so they
+must not depend on the engine's temporary config-scope overlay.
 """
 
 import json
 import os
-import threading
 import time
 import urllib.parse
 
 import requests
 from loguru import logger
 
-from app.config import config
-from app.utils import utils
-
-_SOCIAL_FILE = os.path.join(utils.storage_dir("saas", create=True), "social.json")
-_lock = threading.RLock()
+from app.services import firestore_db
 
 YT_SCOPE = (
     "https://www.googleapis.com/auth/youtube.upload "
@@ -34,62 +30,28 @@ YT_SCOPE = (
 TT_SCOPE = "user.info.basic,video.upload"
 
 
-# --------------------------------------------------------------------------- #
-# Token store
-# --------------------------------------------------------------------------- #
-def _load() -> dict:
-    if os.path.isfile(_SOCIAL_FILE):
-        try:
-            with open(_SOCIAL_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"failed to read social.json: {e}")
-    return {}
+def _settings(uid: str) -> dict:
+    return firestore_db.get_user_settings(uid)
 
 
-def _save(data: dict):
-    tmp = f"{_SOCIAL_FILE}.tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, _SOCIAL_FILE)
+def base_url(uid: str) -> str:
+    return (_settings(uid).get("publish_base_url") or "http://localhost:8080").rstrip("/")
 
 
-def _get(platform: str) -> dict:
-    return _load().get(platform, {})
-
-
-def _set(platform: str, info: dict):
-    with _lock:
-        data = _load()
-        data[platform] = info
-        _save(data)
-
-
-def _clear(platform: str):
-    with _lock:
-        data = _load()
-        data.pop(platform, None)
-        _save(data)
-
-
-def base_url() -> str:
-    return (config.app.get("publish_base_url") or "http://localhost:8080").rstrip("/")
-
-
-def _redirect_uri(platform: str) -> str:
-    return f"{base_url()}/api/v1/saas/{platform}/callback"
+def _redirect_uri(uid: str, platform: str) -> str:
+    return f"{base_url(uid)}/api/v1/saas/{platform}/callback"
 
 
 # --------------------------------------------------------------------------- #
 # YouTube
 # --------------------------------------------------------------------------- #
-def youtube_auth_url() -> str:
-    client_id = config.app.get("youtube_client_id", "")
+def youtube_auth_url(uid: str) -> str:
+    client_id = _settings(uid).get("youtube_client_id", "")
     if not client_id:
         raise ValueError("YouTube client ID is not set. Add it in Settings first.")
     params = {
         "client_id": client_id,
-        "redirect_uri": _redirect_uri("youtube"),
+        "redirect_uri": _redirect_uri(uid, "youtube"),
         "response_type": "code",
         "scope": YT_SCOPE,
         "access_type": "offline",
@@ -99,14 +61,15 @@ def youtube_auth_url() -> str:
     return "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
 
 
-def youtube_exchange_code(code: str) -> dict:
+def youtube_exchange_code(uid: str, code: str) -> dict:
+    settings = _settings(uid)
     resp = requests.post(
         "https://oauth2.googleapis.com/token",
         data={
             "code": code,
-            "client_id": config.app.get("youtube_client_id", ""),
-            "client_secret": config.app.get("youtube_client_secret", ""),
-            "redirect_uri": _redirect_uri("youtube"),
+            "client_id": settings.get("youtube_client_id", ""),
+            "client_secret": settings.get("youtube_client_secret", ""),
+            "redirect_uri": _redirect_uri(uid, "youtube"),
             "grant_type": "authorization_code",
         },
         timeout=30,
@@ -123,20 +86,21 @@ def youtube_exchange_code(code: str) -> dict:
     except Exception as e:
         logger.warning(f"could not fetch youtube channel name: {e}")
         info["channel"] = ""
-    _set("youtube", info)
-    logger.success(f"YouTube connected: {info.get('channel')}")
+    firestore_db.save_user_social(uid, "youtube", info)
+    logger.success(f"YouTube connected for {uid}: {info.get('channel')}")
     return info
 
 
-def _youtube_refresh() -> str:
-    info = _get("youtube")
+def _youtube_refresh(uid: str) -> str:
+    info = firestore_db.get_user_social(uid).get("youtube", {})
     if not info.get("refresh_token"):
         raise ValueError("YouTube is not connected")
+    settings = _settings(uid)
     resp = requests.post(
         "https://oauth2.googleapis.com/token",
         data={
-            "client_id": config.app.get("youtube_client_id", ""),
-            "client_secret": config.app.get("youtube_client_secret", ""),
+            "client_id": settings.get("youtube_client_id", ""),
+            "client_secret": settings.get("youtube_client_secret", ""),
             "refresh_token": info["refresh_token"],
             "grant_type": "refresh_token",
         },
@@ -146,16 +110,16 @@ def _youtube_refresh() -> str:
     tok = resp.json()
     info["access_token"] = tok.get("access_token", "")
     info["expiry"] = time.time() + int(tok.get("expires_in", 3600)) - 60
-    _set("youtube", info)
+    firestore_db.save_user_social(uid, "youtube", info)
     return info["access_token"]
 
 
-def _youtube_token() -> str:
-    info = _get("youtube")
+def _youtube_token(uid: str) -> str:
+    info = firestore_db.get_user_social(uid).get("youtube", {})
     if not info:
         raise ValueError("YouTube is not connected")
     if time.time() >= info.get("expiry", 0):
-        return _youtube_refresh()
+        return _youtube_refresh(uid)
     return info["access_token"]
 
 
@@ -171,8 +135,8 @@ def _youtube_channel_title(token: str) -> str:
     return items[0]["snippet"]["title"] if items else ""
 
 
-def youtube_upload(video_path, title, description, tags, privacy="public") -> dict:
-    token = _youtube_token()
+def youtube_upload(uid: str, video_path, title, description, tags, privacy="public") -> dict:
+    token = _youtube_token(uid)
     size = os.path.getsize(video_path)
     metadata = {
         "snippet": {
@@ -215,8 +179,8 @@ def youtube_upload(video_path, title, description, tags, privacy="public") -> di
     return {"success": True, "id": vid, "url": f"https://youtu.be/{vid}" if vid else ""}
 
 
-def youtube_status() -> dict:
-    info = _get("youtube")
+def youtube_status(uid: str) -> dict:
+    info = firestore_db.get_user_social(uid).get("youtube", {})
     return {
         "connected": bool(info.get("refresh_token") or info.get("access_token")),
         "channel": info.get("channel", ""),
@@ -226,29 +190,30 @@ def youtube_status() -> dict:
 # --------------------------------------------------------------------------- #
 # TikTok
 # --------------------------------------------------------------------------- #
-def tiktok_auth_url() -> str:
-    client_key = config.app.get("tiktok_client_key", "")
+def tiktok_auth_url(uid: str) -> str:
+    client_key = _settings(uid).get("tiktok_client_key", "")
     if not client_key:
         raise ValueError("TikTok client key is not set. Add it in Settings first.")
     params = {
         "client_key": client_key,
         "scope": TT_SCOPE,
         "response_type": "code",
-        "redirect_uri": _redirect_uri("tiktok"),
+        "redirect_uri": _redirect_uri(uid, "tiktok"),
         "state": "mpt",
     }
     return "https://www.tiktok.com/v2/auth/authorize/?" + urllib.parse.urlencode(params)
 
 
-def tiktok_exchange_code(code: str) -> dict:
+def tiktok_exchange_code(uid: str, code: str) -> dict:
+    settings = _settings(uid)
     resp = requests.post(
         "https://open.tiktokapis.com/v2/oauth/token/",
         data={
-            "client_key": config.app.get("tiktok_client_key", ""),
-            "client_secret": config.app.get("tiktok_client_secret", ""),
+            "client_key": settings.get("tiktok_client_key", ""),
+            "client_secret": settings.get("tiktok_client_secret", ""),
             "code": code,
             "grant_type": "authorization_code",
-            "redirect_uri": _redirect_uri("tiktok"),
+            "redirect_uri": _redirect_uri(uid, "tiktok"),
         },
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=30,
@@ -263,20 +228,21 @@ def tiktok_exchange_code(code: str) -> dict:
         "open_id": tok.get("open_id", ""),
         "expiry": time.time() + int(tok.get("expires_in", 86400)) - 60,
     }
-    _set("tiktok", info)
-    logger.success("TikTok connected")
+    firestore_db.save_user_social(uid, "tiktok", info)
+    logger.success(f"TikTok connected for {uid}")
     return info
 
 
-def _tiktok_refresh() -> str:
-    info = _get("tiktok")
+def _tiktok_refresh(uid: str) -> str:
+    info = firestore_db.get_user_social(uid).get("tiktok", {})
     if not info.get("refresh_token"):
         raise ValueError("TikTok is not connected")
+    settings = _settings(uid)
     resp = requests.post(
         "https://open.tiktokapis.com/v2/oauth/token/",
         data={
-            "client_key": config.app.get("tiktok_client_key", ""),
-            "client_secret": config.app.get("tiktok_client_secret", ""),
+            "client_key": settings.get("tiktok_client_key", ""),
+            "client_secret": settings.get("tiktok_client_secret", ""),
             "grant_type": "refresh_token",
             "refresh_token": info["refresh_token"],
         },
@@ -288,22 +254,22 @@ def _tiktok_refresh() -> str:
     info["access_token"] = tok.get("access_token", "")
     info["refresh_token"] = tok.get("refresh_token", info["refresh_token"])
     info["expiry"] = time.time() + int(tok.get("expires_in", 86400)) - 60
-    _set("tiktok", info)
+    firestore_db.save_user_social(uid, "tiktok", info)
     return info["access_token"]
 
 
-def _tiktok_token() -> str:
-    info = _get("tiktok")
+def _tiktok_token(uid: str) -> str:
+    info = firestore_db.get_user_social(uid).get("tiktok", {})
     if not info:
         raise ValueError("TikTok is not connected")
     if time.time() >= info.get("expiry", 0):
-        return _tiktok_refresh()
+        return _tiktok_refresh(uid)
     return info["access_token"]
 
 
-def tiktok_upload(video_path, title="") -> dict:
+def tiktok_upload(uid: str, video_path, title="") -> dict:
     """Send the video to the user's TikTok drafts (inbox). No audit required."""
-    token = _tiktok_token()
+    token = _tiktok_token(uid)
     size = os.path.getsize(video_path)
     init = requests.post(
         "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/",
@@ -351,42 +317,43 @@ def tiktok_upload(video_path, title="") -> dict:
     }
 
 
-def tiktok_status() -> dict:
-    info = _get("tiktok")
+def tiktok_status(uid: str) -> dict:
+    info = firestore_db.get_user_social(uid).get("tiktok", {})
     return {"connected": bool(info.get("refresh_token") or info.get("access_token"))}
 
 
 # --------------------------------------------------------------------------- #
 # Shared helpers
 # --------------------------------------------------------------------------- #
-def disconnect(platform: str):
-    _clear(platform)
+def disconnect(uid: str, platform: str):
+    firestore_db.clear_user_social(uid, platform)
 
 
-def status() -> dict:
-    return {"youtube": youtube_status(), "tiktok": tiktok_status()}
+def status(uid: str) -> dict:
+    return {"youtube": youtube_status(uid), "tiktok": tiktok_status(uid)}
 
 
-def publish_video(video_path: str, meta: dict, platforms: list) -> dict:
+def publish_video(uid: str, video_path: str, meta: dict, platforms: list) -> dict:
     """Publish one local video file to the requested platforms using its metadata."""
     if not os.path.isfile(video_path):
         return {p: {"success": False, "error": "video file not found"} for p in platforms}
     title = (meta or {}).get("title") or ""
     description = (meta or {}).get("description") or ""
     tags = (meta or {}).get("tags") or []
+    settings = _settings(uid)
     results = {}
     if "youtube" in platforms:
         try:
             results["youtube"] = youtube_upload(
-                video_path, title, description, tags,
-                privacy=config.app.get("youtube_privacy", "public"),
+                uid, video_path, title, description, tags,
+                privacy=settings.get("youtube_privacy", "public"),
             )
         except Exception as e:  # noqa: BLE001 - surface any API error to the UI
             logger.error(f"youtube publish failed: {e}")
             results["youtube"] = {"success": False, "error": str(e)}
     if "tiktok" in platforms:
         try:
-            results["tiktok"] = tiktok_upload(video_path, title)
+            results["tiktok"] = tiktok_upload(uid, video_path, title)
         except Exception as e:  # noqa: BLE001
             logger.error(f"tiktok publish failed: {e}")
             results["tiktok"] = {"success": False, "error": str(e)}

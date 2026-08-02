@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Admin - MoneyPrinter Studio</title>
+<style>
+  :root{
+    --bg:#0b0f19; --bg2:#0f1524; --panel:#141b2d; --panel2:#1a2338;
+    --border:#232d45; --text:#e7ecf5; --muted:#8b98b5; --faint:#5c6a89;
+    --accent:#6c5ce7; --accent2:#8b7dff; --grad:linear-gradient(135deg,#6c5ce7,#a06bff);
+    --green:#22c55e; --amber:#f59e0b; --blue:#3b82f6; --red:#ef4444;
+    --shadow:0 10px 30px rgba(0,0,0,.35); --radius:16px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%}
+  body{
+    background:radial-gradient(1200px 600px at 80% -10%,rgba(108,92,231,.18),transparent 60%),var(--bg);
+    color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+    font-size:14px;line-height:1.5;
+  }
+  a{color:var(--accent2);text-decoration:none}
+  .wrap{max-width:1280px;margin:0 auto;padding:30px 38px}
+  .page-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:26px;gap:16px;flex-wrap:wrap}
+  .page-head h2{margin:0;font-size:24px;font-weight:700;display:flex;align-items:center;gap:10px}
+  .page-head h2 .badge{font-size:11px;background:var(--grad);color:#fff;padding:3px 10px;border-radius:999px;font-weight:800;letter-spacing:.4px}
+  .page-head p{margin:4px 0 0;color:var(--muted)}
+
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;border:1px solid var(--border);background:var(--panel);
+    color:var(--text);padding:9px 15px;border-radius:11px;font-weight:600;cursor:pointer;font-size:13.5px;transition:.15s;
+  }
+  .btn:hover{background:var(--panel2);border-color:#33406180}
+  .btn.primary{background:var(--grad);border:none;color:#fff}
+  .btn.danger{color:#ffb4b4;border-color:#4a2530;background:#2a1620}
+  .btn.danger:hover{background:#3a1c28}
+  .btn.sm{padding:6px 11px;font-size:12.5px}
+
+  .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:28px}
+  .stat{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;position:relative;overflow:hidden}
+  .stat .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700}
+  .stat .v{font-size:26px;font-weight:800;margin-top:8px}
+  .stat .ic{position:absolute;right:14px;top:14px;font-size:20px;opacity:.85}
+
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:22px;margin-bottom:26px}
+  .panel h3{margin:0 0 4px;font-size:15px}
+  .panel .hint{color:var(--muted);font-size:12.5px;margin:0 0 16px}
+  .row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;padding:9px 10px;border-bottom:1px solid var(--border)}
+  td{padding:11px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-weight:700;font-size:11.5px;white-space:nowrap}
+  .pill.pending{background:#1c2438;color:#aab6d4}
+  .pill.processing{background:rgba(59,130,246,.15);color:#7db1ff}
+  .pill.done{background:rgba(34,197,94,.15);color:#5ee08a}
+  .pill.failed{background:rgba(239,68,68,.15);color:#ff9d9d}
+  .pill.on{background:rgba(245,158,11,.15);color:#f5c56b}
+  .pill.off{background:#1c2438;color:var(--faint)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(34,197,94,.15);display:inline-block}
+  .dot.paused{background:var(--amber);box-shadow:0 0 0 4px rgba(245,158,11,.15)}
+  input.search{background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:9px 13px;border-radius:10px;font-size:13px;min-width:220px}
+  select.filter{background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:10px;font-size:13px}
+  .muted{color:var(--muted)}
+  .empty{text-align:center;padding:40px;color:var(--muted)}
+  #toast{position:fixed;bottom:26px;right:26px;z-index:50;display:flex;flex-direction:column;gap:10px}
+  .toast{background:var(--panel2);border:1px solid var(--border);border-left:4px solid var(--accent);padding:13px 18px;border-radius:11px;box-shadow:var(--shadow);min-width:240px;animation:slidein .3s}
+  .toast.ok{border-left-color:var(--green)} .toast.err{border-left-color:var(--red)}
+  @keyframes slidein{from{transform:translateX(30px);opacity:0}to{transform:none;opacity:1}}
+  @media(max-width:900px){.stats{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="page-head">
+    <div><h2>🛡 Admin Dashboard <span class="badge">OWNER</span></h2><p>System-wide view across every account.</p></div>
+    <a class="btn" href="/">← Back to app</a>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="k">Total Users</div><div class="v" id="s-users">–</div><div class="ic">👤</div></div>
+    <div class="stat"><div class="k">Disabled</div><div class="v" id="s-disabled">–</div><div class="ic">🚫</div></div>
+    <div class="stat"><div class="k">Auto-mode On</div><div class="v" id="s-auto">–</div><div class="ic">⚡</div></div>
+    <div class="stat"><div class="k">Videos Done</div><div class="v" id="s-videos">–</div><div class="ic">✅</div></div>
+    <div class="stat"><div class="k">Queue (pend/proc)</div><div class="v" id="s-queue">–</div><div class="ic">🕓</div></div>
+  </div>
+
+  <div class="panel">
+    <h3>Engine control</h3>
+    <p class="hint">The render engine is shared by every user - one video renders at a time, system-wide.</p>
+    <div class="row">
+      <span class="dot" id="engine-dot"></span>
+      <span id="engine-label" style="font-weight:700">Loading…</span>
+      <span class="muted" id="engine-detail"></span>
+      <span style="flex:1"></span>
+      <button class="btn" id="engine-toggle">Pause engine</button>
+      <button class="btn" id="autokill-toggle">Disable all auto-mode</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Users</h3>
+    <p class="hint">Disabling a user immediately revokes their access, even on an existing session.</p>
+    <div class="row" style="margin-bottom:14px">
+      <input class="search" id="user-search" placeholder="Search by email…" />
+    </div>
+    <table>
+      <thead><tr><th>Email</th><th>Provider</th><th>Signed up</th><th>Jobs</th><th>Auto-mode</th><th>Status</th><th></th></tr></thead>
+      <tbody id="users-body"></tbody>
+    </table>
+    <div class="empty" id="users-empty" style="display:none">No users yet.</div>
+  </div>
+
+  <div class="panel">
+    <h3>Global job monitor</h3>
+    <p class="hint">Every render job across every account, newest first.</p>
+    <div class="row" style="margin-bottom:14px">
+      <input class="search" id="job-search" placeholder="Search by title or email…" />
+      <select class="filter" id="job-filter">
+        <option value="">All statuses</option>
+        <option value="pending">Pending</option>
+        <option value="processing">Processing</option>
+        <option value="done">Done</option>
+        <option value="failed">Failed</option>
+      </select>
+    </div>
+    <table>
+      <thead><tr><th>Title</th><th>Owner</th><th>Status</th><th>Progress</th><th>Created</th></tr></thead>
+      <tbody id="jobs-body"></tbody>
+    </table>
+    <div class="empty" id="jobs-empty" style="display:none">No jobs yet.</div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => (s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function fmtDate(s){try{return new Date(s).toLocaleString()}catch(e){return s||""}}
+
+function toast(msg, kind="ok"){
+  const t=document.createElement("div");t.className="toast "+kind;t.textContent=msg;
+  $("#toast").appendChild(t);setTimeout(()=>{t.style.opacity=0;setTimeout(()=>t.remove(),300)},3200);
+}
+async function api(path, opts={}){
+  const r=await fetch("/api/v1/admin"+path,{headers:{"Content-Type":"application/json"},...opts});
+  let j={};try{j=await r.json()}catch(e){}
+  if(!r.ok||(j.status&&j.status>=400)) throw new Error(j.message||("HTTP "+r.status));
+  return j.data!==undefined?j.data:j;
+}
+
+let allUsers=[], allJobs=[];
+
+async function loadOverview(){
+  const d=await api("/overview");
+  $("#s-users").textContent=d.total_users;
+  $("#s-disabled").textContent=d.disabled_users;
+  $("#s-auto").textContent=d.auto_mode_users;
+  $("#s-videos").textContent=d.total_videos;
+  $("#s-queue").textContent=(d.job_counts.pending||0)+" / "+(d.job_counts.processing||0);
+}
+
+async function loadEngine(){
+  const d=await api("/engine");
+  $("#engine-dot").className="dot"+(d.paused?" paused":"");
+  $("#engine-label").textContent=d.paused?"Paused":"Running";
+  const detail=[];
+  if(d.current_job_id) detail.push("processing job "+d.current_job_id.slice(0,8)+"… for "+(d.current_uid||"").slice(0,8));
+  if(d.auto_killed) detail.push("auto-mode globally disabled");
+  $("#engine-detail").textContent=detail.join(" · ");
+  $("#engine-toggle").textContent=d.paused?"Resume engine":"Pause engine";
+  $("#autokill-toggle").textContent=d.auto_killed?"Re-enable auto-mode":"Disable all auto-mode";
+  $("#autokill-toggle").className="btn"+(d.auto_killed?" danger":"");
+}
+
+function renderUsers(){
+  const q=($("#user-search").value||"").toLowerCase();
+  const filtered=allUsers.filter(u=>!q||(u.email||"").toLowerCase().includes(q));
+  $("#users-empty").style.display=filtered.length?"none":"block";
+  $("#users-body").innerHTML=filtered.map(u=>`
+    <tr>
+      <td>${esc(u.email)}</td>
+      <td class="muted">${esc(u.provider||"")}</td>
+      <td class="muted">${fmtDate(u.created_at)}</td>
+      <td>${u.job_count||0}</td>
+      <td><span class="pill ${u.settings&&u.settings.auto_mode?"on":"off"}">${u.settings&&u.settings.auto_mode?"ON":"off"}</span></td>
+      <td><span class="pill ${u.is_disabled?"failed":"done"}">${u.is_disabled?"Disabled":"Active"}</span></td>
+      <td><button class="btn sm ${u.is_disabled?"":"danger"}" onclick="toggleUser('${u.uid}',${!u.is_disabled})">${u.is_disabled?"Enable":"Disable"}</button></td>
+    </tr>`).join("");
+}
+
+window.toggleUser=async(uid,disable)=>{
+  if(disable && !confirm("Disable this user? They will lose access immediately.")) return;
+  try{
+    await api(`/users/${uid}/${disable?"disable":"enable"}`,{method:"POST"});
+    toast(disable?"User disabled":"User enabled");
+    await loadUsers();
+  }catch(e){toast(e.message,"err")}
+};
+
+async function loadUsers(){
+  const d=await api("/users");
+  allUsers=d.users||[];
+  renderUsers();
+}
+
+const JOB_META={
+  pending:{cls:"pending",label:"Pending"},
+  processing:{cls:"processing",label:"Processing"},
+  done:{cls:"done",label:"Done"},
+  failed:{cls:"failed",label:"Failed"},
+};
+function renderJobs(){
+  const q=($("#job-search").value||"").toLowerCase();
+  const statusFilter=$("#job-filter").value;
+  const emailByUid={};
+  allUsers.forEach(u=>emailByUid[u.uid]=u.email);
+  const filtered=allJobs.filter(j=>{
+    if(statusFilter && j.status!==statusFilter) return false;
+    if(!q) return true;
+    const email=(emailByUid[j.uid]||j.uid||"").toLowerCase();
+    return (j.title||"").toLowerCase().includes(q) || email.includes(q);
+  });
+  $("#jobs-empty").style.display=filtered.length?"none":"block";
+  $("#jobs-body").innerHTML=filtered.slice(0,200).map(j=>{
+    const m=JOB_META[j.status]||JOB_META.pending;
+    const owner=emailByUid[j.uid]||j.uid||"";
+    return `<tr>
+      <td>${esc(j.title)}${j.auto?' <span class="muted">(auto)</span>':''}</td>
+      <td class="muted">${esc(owner)}</td>
+      <td><span class="pill ${m.cls}">${m.label}</span></td>
+      <td class="muted">${j.status==="processing"?(j.progress||0)+"%":"–"}</td>
+      <td class="muted">${fmtDate(j.created_at)}</td>
+    </tr>`;
+  }).join("");
+}
+
+async function loadJobs(){
+  const d=await api("/jobs");
+  allJobs=(d.jobs||[]).sort((a,b)=>(b.created_at||"").localeCompare(a.created_at||""));
+  renderJobs();
+}
+
+$("#user-search").oninput=renderUsers;
+$("#job-search").oninput=renderJobs;
+$("#job-filter").onchange=renderJobs;
+
+$("#engine-toggle").onclick=async()=>{
+  const paused=$("#engine-label").textContent==="Paused";
+  try{await api("/engine/"+(paused?"resume":"pause"),{method:"POST"});await loadEngine();toast(paused?"Engine resumed":"Engine paused");}
+  catch(e){toast(e.message,"err")}
+};
+$("#autokill-toggle").onclick=async()=>{
+  const killed=$("#autokill-toggle").textContent.includes("Re-enable");
+  try{await api("/engine/auto-kill/"+(killed?"stop":"start"),{method:"POST"});await loadEngine();toast(killed?"Auto-mode re-enabled":"Auto-mode disabled for everyone");}
+  catch(e){toast(e.message,"err")}
+};
+
+async function refreshAll(){
+  try{ await Promise.all([loadOverview(), loadEngine(), loadUsers(), loadJobs()]); }
+  catch(e){ toast(e.message,"err"); }
+}
+refreshAll();
+setInterval(refreshAll, 4000);
+</script>
+</body>
+</html>

@@ -164,6 +164,7 @@
     <div class="nav-item active" data-view="dashboard"><span class="ic">▦</span> Dashboard</div>
     <div class="nav-item" data-view="new"><span class="ic">✎</span> New Script</div>
     <div class="nav-item" data-view="settings"><span class="ic">⚙</span> Settings</div>
+    <a class="nav-item" id="admin-link" href="/admin" style="display:none"><span class="ic">🛡</span> Admin</a>
 
     <div class="engine-box">
       <div class="row">
@@ -173,8 +174,9 @@
           <div style="font-size:11px;color:var(--muted)" id="engine-sub">processing queue</div></div>
         </div>
       </div>
-      <button class="btn sm ghost" id="engine-toggle" style="width:100%;margin-top:12px;justify-content:center">Pause engine</button>
+      <button class="btn sm ghost" id="engine-toggle" style="width:100%;margin-top:12px;justify-content:center;display:none">Pause engine</button>
     </div>
+    <div style="padding:10px 8px 2px;font-size:12px;color:var(--muted);word-break:break-all" id="user-email"></div>
     <a class="btn sm ghost" href="/logout" style="width:100%;margin-top:8px;justify-content:center;box-sizing:border-box">⎋ Log out</a>
   </aside>
 
@@ -250,7 +252,7 @@
 
     <!-- SETTINGS -->
     <section class="view" id="view-settings">
-      <div class="page-head"><div><h2>Settings</h2><p>API keys are stored locally in <code>config.toml</code>.</p></div></div>
+      <div class="page-head"><div><h2>Settings</h2><p>These API keys and preferences are private to your account only.</p></div></div>
       <div class="card">
         <div class="section-title">Stock footage (Pexels)</div>
         <div class="field"><label>Pexels API key</label><input id="s-pexels" placeholder="Pexels key" /></div>
@@ -426,14 +428,14 @@ async function refresh(){
     $("#c-processing").textContent=d.counts.processing||0;
     $("#c-done").textContent=d.counts.done||0;
     $("#c-failed").textContent=d.counts.failed||0;
-    // engine indicator
+    // engine indicator (shared across everyone; only admins can pause it)
     const paused=d.engine&&d.engine.paused;
-    const auto=d.engine&&d.engine.auto;
+    const auto=d.engine&&d.engine.auto_mode;
     $("#engine-dot").className="dot"+(paused?" paused":"");
     $("#engine-label").textContent=paused?"Engine paused":"Engine running";
-    $("#engine-sub").textContent=paused?"queue is on hold":(auto?"auto-generating videos":"processing queue");
+    $("#engine-sub").textContent=paused?"queue is on hold":(auto?"your auto-mode is on":"processing queue");
     $("#engine-toggle").textContent=paused?"Resume engine":"Pause engine";
-    // auto-mode button + banner
+    // auto-mode button + banner (per-user)
     const ab=$("#auto-btn");
     ab.className="btn"+(auto?" auto-on":"");
     ab.textContent=auto?"⚡ Auto Mode: ON":"⚡ Auto Mode";
@@ -453,11 +455,30 @@ window.copyData=async b=>{try{await navigator.clipboard.writeText(b.dataset.copy
 window.retryJob=async id=>{try{await api("/jobs/"+id+"/retry",{method:"POST"});lastSig="";refresh();toast("Re-queued")}catch(e){toast(e.message,"err")}};
 window.delJob=async id=>{if(!confirm("Delete this job and its video?"))return;try{await api("/jobs/"+id,{method:"DELETE"});lastSig="";refresh();toast("Deleted")}catch(e){toast(e.message,"err")}};
 
-/* Engine toggle */
+/* Engine toggle (admin only - see whoami()) */
 $("#engine-toggle").onclick=async()=>{
   const paused=$("#engine-label").textContent.includes("paused");
-  try{await api("/engine/"+(paused?"resume":"pause"),{method:"POST"});refresh();}catch(e){toast(e.message,"err")}
+  try{
+    const r=await fetch("/api/v1/admin/engine/"+(paused?"resume":"pause"),{method:"POST"});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    refresh();
+  }catch(e){toast(e.message,"err")}
 };
+
+/* Current user - show email, reveal Admin nav + engine pause control for admins */
+async function whoami(){
+  try{
+    const r=await fetch("/api/v1/auth/me");
+    const j=await r.json();
+    const me=j.data||{};
+    $("#user-email").textContent=me.email||"";
+    if(me.is_admin){
+      $("#admin-link").style.display="";
+      $("#engine-toggle").style.display="";
+    }
+  }catch(e){}
+}
+whoami();
 
 /* Social connect / disconnect */
 async function connectPlatform(p){

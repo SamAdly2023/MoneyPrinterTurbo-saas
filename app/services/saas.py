@@ -1,18 +1,25 @@
 """
-SaaS layer for MoneyPrinterTurbo.
+SaaS layer for MoneyPrinterTurbo (multi-tenant).
 
 Adds a persistent, self-running "video creation engine" on top of the existing
 generation pipeline (app/services/task.py):
 
-    - A JSON-backed job store (survives restarts).
-    - A single background worker that runs saved scripts one-by-one.
+    - A Firestore-backed job store, scoped per user (users/{uid}/jobs/{id}).
+    - A single background worker that runs everyone's saved scripts one-by-one,
+      strictly sequentially (a fair global FIFO across every signed-up user).
     - Generated videos are copied into a local output folder.
 
-This module deliberately runs `task.start()` directly (instead of going through
-the in-memory TaskManager) so the queue is strictly sequential and fully owned
-by the dashboard, with clean pending -> processing -> done/failed semantics.
+Per-user API keys / defaults: `material.py`, `voice.py`, and `llm.py` all read
+their settings directly from the global `app.config.config` module at the
+point of use (not via function parameters). Since the engine processes
+exactly one job at a time, `_user_config_scope()` below temporarily overlays
+that job's owner's Firestore-stored settings onto the shared config globals
+for the duration of that one job, then restores the previous values in a
+`finally` block. This is only safe because processing is strictly sequential
+- if the engine is ever parallelized, this must be revisited.
 """
 
+import contextlib
 import copy
 import json
 import os
@@ -28,6 +35,7 @@ from loguru import logger
 from app.config import config
 from app.models import const
 from app.models.schema import VideoParams
+from app.services import firestore_db
 from app.services import llm
 from app.services import publish
 from app.services import state as sm
@@ -40,7 +48,23 @@ STATUS_PROCESSING = "processing"
 STATUS_DONE = "done"
 STATUS_FAILED = "failed"
 
-_JOBS_FILE = os.path.join(utils.storage_dir("saas", create=True), "jobs.json")
+# Settings fields a user can configure via the dashboard, and where each one
+# lives in the process-wide config globals while a job is being scoped to
+# its owner. Shared with the settings controller so both stay in sync.
+APP_STR_KEYS = {
+    "video_source", "extra_token", "llm_provider",
+    "groq_api_key", "groq_model_name", "grok_api_key", "grok_model_name",
+    "openai_api_key", "openai_base_url", "openai_model_name",
+    "youtube_client_id", "youtube_client_secret", "youtube_privacy",
+    "tiktok_client_key", "tiktok_client_secret", "publish_base_url",
+}
+APP_LIST_KEYS = {"pexels_api_keys", "pixabay_api_keys"}
+APP_OTHER_KEYS = {"auto_publish", "auto_publish_platforms"}
+UI_KEYS = {
+    "voice_name", "video_aspect", "subtitle_enabled", "font_size",
+    "subtitle_position", "paragraph_number", "video_clip_duration", "bgm_type",
+    "font_name", "text_fore_color",
+}
 
 
 def _now_iso() -> str:
@@ -53,93 +77,40 @@ def output_dir() -> str:
 
 
 class JobStore:
-    """Thread-safe, file-backed collection of jobs."""
+    """Thin, uid-scoped wrapper around the Firestore job collections."""
 
-    def __init__(self, path: str = _JOBS_FILE):
-        self._path = path
-        self._lock = threading.RLock()
-        self._jobs = self._load()
+    def all(self, uid: str):
+        return firestore_db.list_jobs(uid)
 
-    def _load(self):
-        if not os.path.isfile(self._path):
-            return []
-        try:
-            with open(self._path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, list):
-                return data
-            logger.warning("jobs.json is not a list, starting empty")
-        except Exception as e:  # corrupt file should not crash the server
-            logger.warning(f"failed to load jobs.json: {e}")
-        return []
+    def all_admin(self):
+        """Every job across every user - admin dashboard only."""
+        return firestore_db.list_all_jobs()
 
-    def _flush_locked(self):
-        tmp = f"{self._path}.tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self._jobs, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, self._path)
+    def get(self, uid: str, job_id: str):
+        return firestore_db.get_job(uid, job_id)
 
-    def all(self):
-        with self._lock:
-            return copy.deepcopy(self._jobs)
+    def add(self, uid: str, job: dict):
+        return firestore_db.create_job(uid, job)
 
-    def get(self, job_id: str):
-        with self._lock:
-            for job in self._jobs:
-                if job["id"] == job_id:
-                    return copy.deepcopy(job)
-        return None
+    def update(self, uid: str, job_id: str, **changes):
+        firestore_db.update_job(uid, job_id, **changes)
+        return firestore_db.get_job(uid, job_id)
 
-    def add(self, job: dict):
-        with self._lock:
-            self._jobs.append(job)
-            self._flush_locked()
-        return copy.deepcopy(job)
-
-    def update(self, job_id: str, **changes):
-        with self._lock:
-            for job in self._jobs:
-                if job["id"] == job_id:
-                    job.update(changes)
-                    job["updated_at"] = _now_iso()
-                    self._flush_locked()
-                    return copy.deepcopy(job)
-        return None
-
-    def delete(self, job_id: str):
-        with self._lock:
-            before = len(self._jobs)
-            self._jobs = [j for j in self._jobs if j["id"] != job_id]
-            changed = len(self._jobs) != before
-            if changed:
-                self._flush_locked()
-            return changed
+    def delete(self, uid: str, job_id: str):
+        firestore_db.delete_job(uid, job_id)
 
     def next_pending(self):
-        with self._lock:
-            for job in self._jobs:
-                if job["status"] == STATUS_PENDING:
-                    return copy.deepcopy(job)
-        return None
+        """Oldest pending job across every user: (uid, job) or None."""
+        return firestore_db.next_pending_job()
 
     def reset_stuck_jobs(self):
-        """On startup, any job left 'processing' (from a crash) goes back to the queue."""
-        with self._lock:
-            changed = False
-            for job in self._jobs:
-                if job["status"] == STATUS_PROCESSING:
-                    job["status"] = STATUS_PENDING
-                    job["progress"] = 0
-                    job["updated_at"] = _now_iso()
-                    changed = True
-            if changed:
-                self._flush_locked()
+        firestore_db.reset_stuck_jobs()
 
 
 store = JobStore()
 
 
-def create_job(title: str, params: dict, auto: bool = False) -> dict:
+def create_job(uid: str, title: str, params: dict, auto: bool = False) -> dict:
     job = {
         "id": utils.get_uuid(),
         "title": (title or "").strip() or "Untitled video",
@@ -150,17 +121,70 @@ def create_job(title: str, params: dict, auto: bool = False) -> dict:
         "error": "",
         "task_id": "",
         "auto": auto,
-        "created_at": _now_iso(),
-        "updated_at": _now_iso(),
     }
-    store.add(job)
+    job = store.add(uid, job)
     engine.wake()
-    logger.info(f"queued job {job['id']} - {job['title']}")
+    logger.info(f"queued job {job['id']} for {uid} - {job['title']}")
     return job
 
 
 # --------------------------------------------------------------------------- #
-# Auto mode: let Groq invent viral YouTube Shorts and keep the queue fed.
+# Per-user config scoping
+# --------------------------------------------------------------------------- #
+# Held for the *entire* duration of any scoped block below, whether that's
+# the engine rendering a job or an API request doing a one-off LLM call
+# (e.g. generate-script). Without this, a request-time scope and the
+# engine's job-time scope could interleave and clobber each other's overlay
+# on the shared config.app/config.ui dicts. This does mean an on-demand
+# call briefly queues behind a job the engine is currently processing -
+# acceptable for this scale, and consistent with the engine itself being a
+# single sequential worker.
+_config_scope_lock = threading.RLock()
+
+
+@contextlib.contextmanager
+def _user_config_scope(uid: str):
+    """Temporarily overlay one user's settings onto the shared config globals.
+
+    Every scoped key is reset to a blank baseline first (not just merged),
+    so a previous user's job can never leak a value into the next one.
+    """
+    _config_scope_lock.acquire()
+    settings = firestore_db.get_user_settings(uid)
+
+    snapshot_app = {k: config.app.get(k) for k in APP_STR_KEYS | APP_LIST_KEYS | APP_OTHER_KEYS}
+    snapshot_ui = {k: config.ui.get(k) for k in UI_KEYS}
+
+    try:
+        for k in APP_STR_KEYS:
+            config.app[k] = settings.get(k, "")
+        for k in APP_LIST_KEYS:
+            v = settings.get(k) or []
+            config.app[k] = [v] if isinstance(v, str) and v else (v if isinstance(v, list) else [])
+        for k in APP_OTHER_KEYS:
+            config.app[k] = settings.get(k, False if k == "auto_publish" else [])
+        for k in UI_KEYS:
+            if k in settings:
+                config.ui[k] = settings[k]
+        yield settings
+    finally:
+        for k, v in snapshot_app.items():
+            if v is None:
+                config.app.pop(k, None)
+            else:
+                config.app[k] = v
+        for k, v in snapshot_ui.items():
+            if v is None:
+                config.ui.pop(k, None)
+            else:
+                config.ui[k] = v
+        _config_scope_lock.release()
+
+
+# --------------------------------------------------------------------------- #
+# Auto mode: let the user's configured LLM invent viral Shorts and keep the
+# queue fed. Each user opts in independently (settings.auto_mode); when the
+# global queue is empty the engine round-robins across opted-in users.
 # --------------------------------------------------------------------------- #
 # Narration length target: ~130-170 words reads aloud in roughly 40-80 seconds.
 SCRIPT_LENGTH_PROMPT = (
@@ -263,10 +287,10 @@ def generate_viral_idea() -> dict:
     return {"title": title, "subject": subject, "script": script, "keywords": keywords}
 
 
-def generate_viral_job() -> dict:
+def generate_viral_job(uid: str) -> dict:
     idea = generate_viral_idea()
     params = build_default_params(idea["subject"], idea["script"], idea["keywords"])
-    return create_job(title=idea["title"], params=params, auto=True)
+    return create_job(uid, title=idea["title"], params=params, auto=True)
 
 
 def generate_publish_metadata(subject: str, script: str) -> dict:
@@ -339,15 +363,16 @@ def _collect_outputs(job_id: str, task_id: str, result: dict):
 
 
 class Engine:
-    """Sequential background worker that drains the pending queue."""
+    """Sequential background worker that drains the pending queue for everyone."""
 
     def __init__(self):
         self._wake = threading.Event()
         self._paused = threading.Event()  # set == paused
-        self._auto = threading.Event()    # set == auto mode on
+        self._auto_kill = threading.Event()  # set == admin globally disabled auto-mode
         self._thread = None
         self._started = False
         self.current_job_id = None
+        self.current_uid = None
 
     # -- lifecycle -----------------------------------------------------------
     def start(self):
@@ -369,27 +394,29 @@ class Engine:
         self._paused.clear()
         self.wake()
 
-    def auto_start(self):
-        self._auto.set()
-        self.wake()
+    def auto_kill_start(self):
+        """Admin-only global kill switch: stop ALL users' auto-mode generation."""
+        self._auto_kill.set()
 
-    def auto_stop(self):
-        self._auto.clear()
+    def auto_kill_stop(self):
+        self._auto_kill.clear()
+        self.wake()
 
     @property
     def paused(self) -> bool:
         return self._paused.is_set()
 
     @property
-    def auto(self) -> bool:
-        return self._auto.is_set()
+    def auto_killed(self) -> bool:
+        return self._auto_kill.is_set()
 
     def status(self) -> dict:
         return {
             "running": self._started,
             "paused": self.paused,
-            "auto": self.auto,
+            "auto_killed": self.auto_killed,
             "current_job_id": self.current_job_id,
+            "current_uid": self.current_uid,
         }
 
     # -- worker loop ---------------------------------------------------------
@@ -400,45 +427,53 @@ class Engine:
                 time.sleep(1)
                 continue
 
-            job = store.next_pending()
-            if job is not None:
-                self._process(job)
+            next_job = store.next_pending()
+            if next_job is not None:
+                uid, job = next_job
+                self._process(uid, job)
                 continue
 
-            # Queue is empty. In auto mode, invent a new viral video and loop.
-            if self.auto and not self.paused and time.time() >= auto_cooldown_until:
+            # Queue is empty. Round-robin across users with auto-mode enabled.
+            if not self.auto_killed and time.time() >= auto_cooldown_until:
                 if self._auto_generate():
                     continue
-                # generation failed (e.g. LLM/network) -> back off before retrying
                 auto_cooldown_until = time.time() + 30
-                logger.warning("auto-mode generation failed, retrying in 30s")
 
-            # Idle: wait until woken by a new job / resume / auto toggle.
+            # Idle: wait until woken by a new job / resume / settings change.
             self._wake.wait(timeout=5)
             self._wake.clear()
 
     def _auto_generate(self) -> bool:
+        user = firestore_db.next_auto_mode_user()
+        if not user:
+            return False
+        uid = user["uid"]
         try:
-            job = generate_viral_job()
-            logger.success(f"auto-mode created job {job['id']} - {job['title']}")
+            with _user_config_scope(uid):
+                job = generate_viral_job(uid)
+            firestore_db.mark_auto_generated(uid)
+            logger.success(f"auto-mode created job {job['id']} for {uid} - {job['title']}")
             return True
         except Exception as e:  # noqa: BLE001 - keep the loop alive on any failure
-            logger.error(f"auto-mode generation failed: {e}")
+            firestore_db.mark_auto_generated(uid)  # still rotate past this user
+            logger.error(f"auto-mode generation failed for {uid}: {e}")
             return False
 
-    def _process(self, job: dict):
+    def _process(self, uid: str, job: dict):
         job_id = job["id"]
         task_id = utils.get_uuid()
         self.current_job_id = job_id
-        store.update(job_id, status=STATUS_PROCESSING, progress=1, task_id=task_id, error="")
-        logger.info(f"processing job {job_id} (task {task_id})")
+        self.current_uid = uid
+        store.update(uid, job_id, status=STATUS_PROCESSING, progress=1, task_id=task_id, error="")
+        logger.info(f"processing job {job_id} for {uid} (task {task_id})")
 
         try:
             params = VideoParams(**job["params"])
         except Exception as e:
             logger.error(f"invalid params for job {job_id}: {e}")
-            store.update(job_id, status=STATUS_FAILED, error=f"Invalid parameters: {e}")
+            store.update(uid, job_id, status=STATUS_FAILED, error=f"Invalid parameters: {e}")
             self.current_job_id = None
+            self.current_uid = None
             return
 
         sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=0)
@@ -447,7 +482,8 @@ class Engine:
 
         def _work():
             try:
-                result_holder["result"] = tm.start(task_id=task_id, params=params, stop_at="video")
+                with _user_config_scope(uid):
+                    result_holder["result"] = tm.start(task_id=task_id, params=params, stop_at="video")
             except Exception as e:  # noqa: BLE001 - surface any pipeline error to the UI
                 logger.exception(f"job {job_id} crashed")
                 result_holder["error"] = str(e)
@@ -459,7 +495,7 @@ class Engine:
         while worker.is_alive():
             t = sm.state.get_task(task_id)
             if t:
-                store.update(job_id, progress=max(1, int(t.get("progress", 0))))
+                store.update(uid, job_id, progress=max(1, int(t.get("progress", 0))))
             time.sleep(1.0)
         worker.join()
 
@@ -469,7 +505,7 @@ class Engine:
 
         if pipeline_error or final_state.get("state") == const.TASK_STATE_FAILED or not result:
             msg = pipeline_error or "Generation failed. Check the server logs (API keys, network, or voice/language mismatch)."
-            store.update(job_id, status=STATUS_FAILED, error=msg)
+            store.update(uid, job_id, status=STATUS_FAILED, error=msg)
             logger.error(f"job {job_id} failed: {msg}")
         else:
             urls = _collect_outputs(job_id, task_id, result)
@@ -480,14 +516,15 @@ class Engine:
             meta = {}
             meta_file = ""
             try:
-                meta = generate_publish_metadata(subject, final_script)
+                with _user_config_scope(uid):
+                    meta = generate_publish_metadata(subject, final_script)
                 meta_file = _write_publish_file(job_id, meta)
             except Exception as e:  # never fail a rendered video over metadata
                 logger.warning(f"job {job_id}: metadata generation failed: {e}")
                 meta = {"title": job.get("title", subject), "description": "", "tags": []}
 
             store.update(
-                job_id,
+                uid, job_id,
                 status=STATUS_DONE,
                 progress=100,
                 videos=urls,
@@ -497,23 +534,25 @@ class Engine:
                 error="",
             )
             logger.success(f"job {job_id} done, {len(urls)} video(s)")
-            self._auto_publish(job_id, urls, meta)
+            with _user_config_scope(uid):
+                self._auto_publish(uid, job_id, urls, meta)
 
         self.current_job_id = None
+        self.current_uid = None
 
-    def _auto_publish(self, job_id: str, urls: list, meta: dict):
+    def _auto_publish(self, uid: str, job_id: str, urls: list, meta: dict):
         """If enabled, publish the finished video to connected platforms."""
         try:
             if not config.app.get("auto_publish") or not urls:
                 return
             wanted = config.app.get("auto_publish_platforms") or []
-            st = publish.status()
+            st = publish.status(uid)
             plats = [p for p in wanted if st.get(p, {}).get("connected")]
             if not plats:
                 return
             video_path = os.path.join(output_dir(), os.path.basename(urls[0]))
-            results = publish.publish_video(video_path, meta, plats)
-            store.update(job_id, publish=results)
+            results = publish.publish_video(uid, video_path, meta, plats)
+            store.update(uid, job_id, publish=results)
             logger.info(f"auto-published job {job_id} to {plats}")
         except Exception as e:  # noqa: BLE001 - publishing must never fail a render
             logger.warning(f"auto-publish failed for {job_id}: {e}")
