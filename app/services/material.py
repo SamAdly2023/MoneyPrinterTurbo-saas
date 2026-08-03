@@ -117,6 +117,21 @@ def search_videos_pixabay(
     aspect = VideoAspect(video_aspect)
 
     video_width, video_height = aspect.to_resolution()
+    # Pixabay's video API has no orientation filter (unlike Pexels'
+    # `orientation` param), so it happily returns landscape clips even when
+    # searching for a portrait target - those get letterboxed with black
+    # bars top/bottom when composited. Only accept file variants whose
+    # orientation actually matches the target.
+    target_ratio = video_width / video_height
+
+    def _same_orientation(file_ratio: float) -> bool:
+        def _bucket(r):
+            if r < 0.9:
+                return "portrait"
+            if r > 1.1:
+                return "landscape"
+            return "square"
+        return _bucket(target_ratio) == _bucket(file_ratio)
 
     api_key = get_api_key("pixabay_api_keys")
     # Build URL
@@ -146,18 +161,23 @@ def search_videos_pixabay(
             if duration < minimum_duration:
                 continue
             video_files = v["videos"]
-            # loop through each url to determine the best quality
+            # pick the largest file variant that both meets the minimum
+            # width and matches the target orientation
+            best = None
             for video_type in video_files:
                 video = video_files[video_type]
                 w = int(video["width"])
-                # h = int(video["height"])
-                if w >= video_width:
-                    item = MaterialInfo()
-                    item.provider = "pixabay"
-                    item.url = video["url"]
-                    item.duration = duration
-                    video_items.append(item)
-                    break
+                h = int(video.get("height") or 0)
+                if w <= 0 or h <= 0 or not _same_orientation(w / h):
+                    continue
+                if w >= video_width and (best is None or w > best[0]):
+                    best = (w, video["url"])
+            if best:
+                item = MaterialInfo()
+                item.provider = "pixabay"
+                item.url = best[1]
+                item.duration = duration
+                video_items.append(item)
         return video_items
     except Exception as e:
         logger.error(f"search videos failed: {str(e)}")
