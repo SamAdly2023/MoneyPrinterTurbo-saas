@@ -301,6 +301,59 @@ def save_video(video_url: str, save_dir: str = "") -> str:
     return ""
 
 
+_SEARCH_FUNCS = {
+    "pexels": search_videos_pexels,
+    "pixabay": search_videos_pixabay,
+    "coverr": search_videos_coverr,
+}
+_PROVIDER_CFG_KEYS = {
+    "pexels": "pexels_api_keys",
+    "pixabay": "pixabay_api_keys",
+    "coverr": "coverr_api_keys",
+}
+
+
+def _has_api_key(provider: str) -> bool:
+    return bool(config.app.get(_PROVIDER_CFG_KEYS.get(provider, "")))
+
+
+def _build_provider_chain(primary: str) -> List[str]:
+    """Primary source first, then any other provider that has an API key
+    configured - used as a fallback when the primary is rate-limited or
+    returns nothing for a given search term."""
+    chain = [primary] if primary in _SEARCH_FUNCS else []
+    for provider in ("pexels", "pixabay", "coverr"):
+        if provider not in chain and _has_api_key(provider):
+            chain.append(provider)
+    return chain or ["pexels"]
+
+
+def _search_with_fallback(
+    search_term: str,
+    minimum_duration: int,
+    video_aspect: VideoAspect,
+    provider_chain: List[str],
+) -> List[MaterialInfo]:
+    for i, provider in enumerate(provider_chain):
+        try:
+            items = _SEARCH_FUNCS[provider](
+                search_term=search_term,
+                minimum_duration=minimum_duration,
+                video_aspect=video_aspect,
+            )
+        except Exception as e:  # e.g. missing API key for this provider
+            items = []
+            logger.warning(f"{provider} search errored for '{search_term}': {e}")
+        if items:
+            return items
+        if i + 1 < len(provider_chain):
+            logger.info(
+                f"no results from {provider} for '{search_term}', "
+                f"falling back to {provider_chain[i + 1]}"
+            )
+    return []
+
+
 def download_videos(
     task_id: str,
     search_terms: List[str],
@@ -311,11 +364,14 @@ def download_videos(
     max_clip_duration: int = 5,
     match_script_order: bool = False,
 ) -> List[str]:
-    search_videos = search_videos_pexels
-    if source == "pixabay":
-        search_videos = search_videos_pixabay
-    elif source == "coverr":
-        search_videos = search_videos_coverr
+    provider_chain = _build_provider_chain(source)
+    if len(provider_chain) > 1:
+        logger.info(f"video source fallback chain: {provider_chain}")
+
+    def search_videos(search_term, minimum_duration, video_aspect):
+        return _search_with_fallback(
+            search_term, minimum_duration, video_aspect, provider_chain
+        )
 
     material_directory = config.app.get("material_directory", "").strip()
     if material_directory == "task":

@@ -254,9 +254,13 @@
     <section class="view" id="view-settings">
       <div class="page-head"><div><h2>Settings</h2><p>These API keys and preferences are private to your account only.</p></div></div>
       <div class="card">
-        <div class="section-title">Stock footage (Pexels)</div>
-        <div class="field"><label>Pexels API key</label><input id="s-pexels" placeholder="Pexels key" /></div>
-        <div class="field"><label>Video source</label>
+        <div class="section-title">Stock footage</div>
+        <p class="hint">Add both keys and the pipeline automatically falls back to the other one if your primary source gets rate-limited.</p>
+        <div class="grid2">
+          <div class="field"><label>Pexels API key</label><input id="s-pexels" placeholder="Pexels key" /></div>
+          <div class="field"><label>Pixabay API key <span class="desc">optional fallback</span></label><input id="s-pixabay" placeholder="Pixabay key" /></div>
+        </div>
+        <div class="field"><label>Primary video source <span class="desc">tried first; the other key above is the fallback</span></label>
           <select id="s-source"><option value="pexels">Pexels</option><option value="pixabay">Pixabay</option><option value="local">Local files</option></select></div>
         <div class="field"><label>Additional token <span class="desc">stored for your reference</span></label><input id="s-extra" placeholder="" /></div>
 
@@ -558,6 +562,7 @@ async function loadSettings(){
   try{
     const s=await api("/settings");
     $("#s-pexels").value=s.pexels_api_key||"";
+    $("#s-pixabay").value=s.pixabay_api_key||"";
     $("#s-source").value=s.video_source||"pexels";
     $("#s-extra").value=s.extra_token||"";
     $("#s-provider").value=s.llm_provider||"groq";
@@ -592,6 +597,7 @@ $("#s-baseurl").oninput=()=>updateRedirects($("#s-baseurl").value);
 $("#save-settings").onclick=async()=>{
   const body={
     pexels_api_key:$("#s-pexels").value.trim(),
+    pixabay_api_key:$("#s-pixabay").value.trim(),
     video_source:$("#s-source").value,
     extra_token:$("#s-extra").value.trim(),
     llm_provider:$("#s-provider").value,
