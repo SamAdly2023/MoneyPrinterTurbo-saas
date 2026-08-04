@@ -171,7 +171,8 @@
     </div>
     <div class="nav-item active" data-view="dashboard"><span class="ic">▦</span> Dashboard</div>
     <div class="nav-item" data-view="new"><span class="ic">✎</span> New Script</div>
-    <div class="nav-item" data-view="settings"><span class="ic">⚙</span> Settings</div>
+    <div class="nav-item" data-view="profile"><span class="ic">🏢</span> Profile</div>
+    <div class="nav-item" id="settings-link" data-view="settings" style="display:none"><span class="ic">⚙</span> Settings</div>
     <a class="nav-item" id="admin-link" href="/admin" style="display:none"><span class="ic">🛡</span> Admin</a>
 
     <div class="engine-box">
@@ -258,9 +259,38 @@
       </div>
     </section>
 
+    <!-- PROFILE -->
+    <section class="view" id="view-profile">
+      <div class="page-head"><div><h2>Business Profile</h2><p>Tell us about your business - we'll weave it into the videos we generate for you.</p></div></div>
+      <div class="card">
+        <div class="section-title">Business info</div>
+        <div class="field"><label>Business name</label><input id="p-name" placeholder="e.g. BRM Masonry Restoration" /></div>
+        <div class="grid2">
+          <div class="field"><label>Website</label><input id="p-website" placeholder="https://..." /></div>
+          <div class="field"><label>Email</label><input id="p-email" placeholder="contact@yourbusiness.com" /></div>
+        </div>
+        <div class="field"><label>Address</label><input id="p-address" placeholder="City, State" /></div>
+        <div class="field"><label>About your business <span class="desc">used to steer Auto Mode topics + call-to-actions</span></label>
+          <textarea id="p-bio" placeholder="What does your business do? Who are your customers?"></textarea></div>
+
+        <div class="section-title">Publishing — auto-share</div>
+        <div class="field switch"><input type="checkbox" id="p-autopub" /><label style="margin:0">Auto-publish each finished video</label></div>
+        <div class="field"><label>Auto-publish to</label>
+          <div style="display:flex;gap:18px;margin-top:4px">
+            <label class="switch" style="font-weight:500"><input type="checkbox" id="p-pub-yt" /> YouTube</label>
+            <label class="switch" style="font-weight:500"><input type="checkbox" id="p-pub-tt" /> TikTok (drafts)</label>
+          </div>
+        </div>
+        <div class="field"><label>YouTube upload privacy</label>
+          <select id="p-yt-privacy"><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></div>
+
+        <div class="form-actions"><button class="btn primary" id="save-profile">Save profile</button></div>
+      </div>
+    </section>
+
     <!-- SETTINGS -->
     <section class="view" id="view-settings">
-      <div class="page-head"><div><h2>Settings</h2><p>These API keys and preferences are private to your account only.</p></div></div>
+      <div class="page-head"><div><h2>Settings</h2><p>Shared by every account - only visible to the admin.</p></div></div>
       <div class="card">
         <div class="section-title">Stock footage</div>
         <p class="hint">Add both keys and the pipeline automatically falls back to the other one if your primary source gets rate-limited.</p>
@@ -293,24 +323,13 @@
         </div>
         <div class="field switch"><input type="checkbox" id="s-subs" checked /><label style="margin:0">Subtitles enabled by default</label></div>
 
-        <div class="section-title">Publishing — auto-share</div>
-        <div class="field switch"><input type="checkbox" id="s-autopub" /><label style="margin:0">Auto-publish each finished video</label></div>
-        <div class="field"><label>Auto-publish to</label>
-          <div style="display:flex;gap:18px;margin-top:4px">
-            <label class="switch" style="font-weight:500"><input type="checkbox" id="s-pub-yt" /> YouTube</label>
-            <label class="switch" style="font-weight:500"><input type="checkbox" id="s-pub-tt" /> TikTok (drafts)</label>
-          </div>
-        </div>
-
         <div class="section-title">Publishing — YouTube (free, works locally)</div>
-        <p class="hint">Create an OAuth <b>Web application</b> client in Google Cloud (enable “YouTube Data API v3”), add the redirect URI below, add yourself as a test user, then paste the ID/secret here.</p>
+        <p class="hint">Create an OAuth <b>Web application</b> client in Google Cloud (enable “YouTube Data API v3”), add the redirect URI below, add yourself as a test user, then paste the ID/secret here. This is the shared OAuth app - each user still connects their own channel from the Dashboard.</p>
         <div class="field"><label>Authorized redirect URI <span class="desc">paste this into your Google OAuth client</span></label><input id="s-redirect-yt" readonly /></div>
         <div class="grid2">
           <div class="field"><label>YouTube client ID</label><input id="s-yt-id" placeholder="...apps.googleusercontent.com" /></div>
           <div class="field"><label>YouTube client secret</label><input id="s-yt-secret" placeholder="GOCSPX-..." /></div>
         </div>
-        <div class="field"><label>Upload privacy</label>
-          <select id="s-yt-privacy"><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></div>
 
         <div class="section-title">Publishing — TikTok (needs app audit for auto-post)</div>
         <p class="hint">From TikTok for Developers. Without an approved audit, videos are sent to your TikTok <b>drafts</b>. TikTok requires an <b>https</b> redirect URI, so set the base URL (e.g. an ngrok https URL) below.</p>
@@ -351,6 +370,7 @@ function show(view){
   $("#view-"+view).classList.add("active");
   const nav=document.querySelector('.nav-item[data-view="'+view+'"]');if(nav)nav.classList.add("active");
   if(view==="settings")loadSettings();
+  if(view==="profile")loadProfile();
 }
 document.addEventListener("click",e=>{const el=e.target.closest("[data-view]");if(el){show(el.dataset.view)}});
 
@@ -489,6 +509,7 @@ async function whoami(){
     if(me.is_admin){
       $("#admin-link").style.display="";
       $("#engine-toggle").style.display="";
+      $("#settings-link").style.display="";
     }
   }catch(e){}
 }
@@ -567,10 +588,16 @@ $("#save-job").onclick=async()=>{
   finally{btn.disabled=false}
 };
 
-/* Settings */
+/* Settings (admin-only - shared API keys / integrations) */
+async function adminApi(path, opts={}){
+  const r=await fetch("/api/v1/admin"+path,{headers:{"Content-Type":"application/json"},...opts});
+  let j={};try{j=await r.json()}catch(e){}
+  if(!r.ok||(j.status&&j.status>=400)) throw new Error(j.message||("HTTP "+r.status));
+  return j.data!==undefined?j.data:j;
+}
 async function loadSettings(){
   try{
-    const s=await api("/settings");
+    const s=await adminApi("/settings");
     $("#s-pexels").value=s.pexels_api_key||"";
     $("#s-pixabay").value=s.pixabay_api_key||"";
     $("#s-source").value=s.video_source||"pexels";
@@ -583,14 +610,8 @@ async function loadSettings(){
     $("#s-aspect").value=s.video_aspect||"9:16";
     $("#s-subpos").value=s.subtitle_position||"bottom";
     $("#s-subs").checked=s.subtitle_enabled!==false;
-    // publishing
-    $("#s-autopub").checked=!!s.auto_publish;
-    const plats=s.auto_publish_platforms||[];
-    $("#s-pub-yt").checked=plats.includes("youtube");
-    $("#s-pub-tt").checked=plats.includes("tiktok");
     $("#s-yt-id").value=s.youtube_client_id||"";
     $("#s-yt-secret").value=s.youtube_client_secret||"";
-    $("#s-yt-privacy").value=s.youtube_privacy||"public";
     $("#s-tt-key").value=s.tiktok_client_key||"";
     $("#s-tt-secret").value=s.tiktok_client_secret||"";
     const base=(s.publish_base_url||"http://localhost:8080").replace(/\/$/,"");
@@ -618,17 +639,46 @@ $("#save-settings").onclick=async()=>{
     video_aspect:$("#s-aspect").value,
     subtitle_position:$("#s-subpos").value,
     subtitle_enabled:$("#s-subs").checked,
-    auto_publish:$("#s-autopub").checked,
-    auto_publish_platforms:[...($("#s-pub-yt").checked?["youtube"]:[]),...($("#s-pub-tt").checked?["tiktok"]:[])],
     youtube_client_id:$("#s-yt-id").value.trim(),
     youtube_client_secret:$("#s-yt-secret").value.trim(),
-    youtube_privacy:$("#s-yt-privacy").value,
     tiktok_client_key:$("#s-tt-key").value.trim(),
     tiktok_client_secret:$("#s-tt-secret").value.trim(),
     publish_base_url:$("#s-baseurl").value.trim()||"http://localhost:8080",
   };
   const btn=$("#save-settings");btn.disabled=true;
-  try{await api("/settings",{method:"POST",body:JSON.stringify(body)});toast("Settings saved");}
+  try{await adminApi("/settings",{method:"POST",body:JSON.stringify(body)});toast("Settings saved");}
+  catch(e){toast(e.message,"err")}finally{btn.disabled=false}
+};
+
+/* Profile (per-account business branding) */
+async function loadProfile(){
+  try{
+    const p=await api("/profile");
+    $("#p-name").value=p.business_name||"";
+    $("#p-website").value=p.business_website||"";
+    $("#p-email").value=p.business_email||"";
+    $("#p-address").value=p.business_address||"";
+    $("#p-bio").value=p.business_bio||"";
+    $("#p-autopub").checked=!!p.auto_publish;
+    const plats=p.auto_publish_platforms||[];
+    $("#p-pub-yt").checked=plats.includes("youtube");
+    $("#p-pub-tt").checked=plats.includes("tiktok");
+    $("#p-yt-privacy").value=p.youtube_privacy||"public";
+  }catch(e){toast("Could not load profile","err")}
+}
+$("#save-profile").onclick=async()=>{
+  const body={
+    business_name:$("#p-name").value.trim(),
+    business_website:$("#p-website").value.trim(),
+    business_email:$("#p-email").value.trim(),
+    business_address:$("#p-address").value.trim(),
+    business_bio:$("#p-bio").value.trim(),
+    auto_publish:$("#p-autopub").checked,
+    auto_publish_platforms:[...($("#p-pub-yt").checked?["youtube"]:[]),...($("#p-pub-tt").checked?["tiktok"]:[])],
+    youtube_privacy:$("#p-yt-privacy").value,
+  };
+  const btn=$("#save-profile");btn.disabled=true;
+  try{await api("/profile",{method:"POST",body:JSON.stringify(body)});toast("Profile saved");}
   catch(e){toast(e.message,"err")}finally{btn.disabled=false}
 };
 

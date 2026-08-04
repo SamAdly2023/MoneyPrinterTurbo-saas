@@ -20,12 +20,26 @@ from firebase_admin import firestore
 
 db = firestore.client()
 
-DEFAULT_SETTINGS = {
-    "llm_provider": "openai",
+# Per-user data: business branding + this business's queue/publish toggles.
+# API keys and technical integration config live in app_config/global instead
+# (see DEFAULT_GLOBAL_SETTINGS below) - every signed-up user shares those.
+DEFAULT_PROFILE = {
+    "business_name": "",
+    "business_address": "",
+    "business_website": "",
+    "business_email": "",
+    "business_bio": "",
     "auto_mode": False,
     "auto_publish": False,
     "auto_publish_platforms": [],
+    "youtube_privacy": "public",
 }
+
+DEFAULT_GLOBAL_SETTINGS = {
+    "llm_provider": "openai",
+}
+
+_GLOBAL_SETTINGS_REF = ("app_config", "global")
 
 
 def _now() -> str:
@@ -59,7 +73,7 @@ def create_user_if_missing(uid: str, email: str, provider: str) -> dict:
         "is_disabled": False,
         "created_at": _now(),
         "last_auto_generated_at": None,
-        "settings": dict(DEFAULT_SETTINGS),
+        "profile": dict(DEFAULT_PROFILE),
         "social": {},
     }
     ref.set(doc)
@@ -80,16 +94,28 @@ def set_user_disabled(uid: str, disabled: bool) -> None:
     db.collection("users").document(uid).update({"is_disabled": disabled})
 
 
-def get_user_settings(uid: str) -> dict:
+def get_user_profile(uid: str) -> dict:
     user = get_user(uid)
-    settings = dict(DEFAULT_SETTINGS)
-    if user and user.get("settings"):
-        settings.update(user["settings"])
+    profile = dict(DEFAULT_PROFILE)
+    if user and user.get("profile"):
+        profile.update(user["profile"])
+    return profile
+
+
+def save_user_profile(uid: str, profile: dict) -> None:
+    db.collection("users").document(uid).set({"profile": profile}, merge=True)
+
+
+def get_global_settings() -> dict:
+    snap = db.collection(_GLOBAL_SETTINGS_REF[0]).document(_GLOBAL_SETTINGS_REF[1]).get()
+    settings = dict(DEFAULT_GLOBAL_SETTINGS)
+    if snap.exists:
+        settings.update(snap.to_dict())
     return settings
 
 
-def save_user_settings(uid: str, settings: dict) -> None:
-    db.collection("users").document(uid).set({"settings": settings}, merge=True)
+def save_global_settings(settings: dict) -> None:
+    db.collection(_GLOBAL_SETTINGS_REF[0]).document(_GLOBAL_SETTINGS_REF[1]).set(settings, merge=True)
 
 
 def get_user_social(uid: str) -> dict:
@@ -117,7 +143,7 @@ def next_auto_mode_user() -> dict | None:
     candidates = [
         u
         for u in list_users()
-        if not u.get("is_disabled") and u.get("settings", {}).get("auto_mode")
+        if not u.get("is_disabled") and u.get("profile", {}).get("auto_mode")
     ]
     if not candidates:
         return None

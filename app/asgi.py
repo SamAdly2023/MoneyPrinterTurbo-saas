@@ -15,7 +15,7 @@ from app.router import root_api_router
 from app.services import auth
 from app.utils import utils
 
-_PUBLIC_PATHS = {"/login", "/logout", "/api/v1/auth/session"}
+_PUBLIC_PATHS = {"/login", "/logout", "/api/v1/auth/session", "/logo.svg"}
 
 
 def _read_public_html(name: str) -> str:
@@ -75,23 +75,34 @@ app.add_middleware(
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
     path = request.url.path
+
+    # Every response this middleware touches is auth-dependent (even a
+    # "public" path's response can vary by login state), so no CDN in front
+    # of this app (e.g. the Firebase Hosting rewrite) may ever cache it -
+    # doing so previously served a stale unauthenticated 302 back to a user
+    # who had just logged in, because the edge cached the redirect and
+    # replayed it regardless of the fresh, valid session cookie.
+    def _no_store(response):
+        response.headers["Cache-Control"] = "no-store, private"
+        return response
+
     if path in _PUBLIC_PATHS:
-        return await call_next(request)
+        return _no_store(await call_next(request))
 
     user = auth.get_current_user(request)
     if user is None:
         if path.startswith("/api/"):
-            return JSONResponse(
+            return _no_store(JSONResponse(
                 status_code=401,
                 content=utils.get_response(401, None, "authentication required"),
-            )
-        return RedirectResponse(url="/login", status_code=302)
+            ))
+        return _no_store(RedirectResponse(url="/login", status_code=302))
 
     if path == "/admin" and not user["is_admin"]:
-        return JSONResponse(status_code=403, content=utils.get_response(403, None, "admin only"))
+        return _no_store(JSONResponse(status_code=403, content=utils.get_response(403, None, "admin only")))
 
     request.state.user = user
-    return await call_next(request)
+    return _no_store(await call_next(request))
 
 
 @app.get("/login", response_class=HTMLResponse)

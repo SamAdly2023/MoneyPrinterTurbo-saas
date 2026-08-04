@@ -5,8 +5,8 @@ Endpoints (all under /api/v1), every one of them scoped to the calling
 user's own Firestore data (request.state.user["uid"], set by asgi.py's
 auth_gate middleware after verifying the session cookie):
 
-    GET    /saas/settings              read this user's settings
-    POST   /saas/settings              persist this user's settings
+    GET    /saas/profile               read this user's business profile
+    POST   /saas/profile               persist this user's business profile
     GET    /saas/jobs                  list this user's queued/finished jobs
     POST   /saas/jobs                  save a script and queue it
     DELETE /saas/jobs/{job_id}         remove one of this user's jobs
@@ -14,11 +14,13 @@ auth_gate middleware after verifying the session cookie):
     GET    /saas/engine                shared engine status + this user's auto-mode flag
     POST   /saas/engine/auto/start     enable this user's auto-mode
     POST   /saas/engine/auto/stop      disable this user's auto-mode
-    POST   /saas/generate-script       AI-generate a script with this user's LLM key
+    POST   /saas/generate-script       AI-generate a script, branded for this user's business
 
-Engine pause/resume and the global auto-mode kill switch are admin-only and
-live in app/controllers/v1/admin.py - letting any signed-up user pause the
-shared render queue for everyone would be a straightforward abuse vector.
+API keys / LLM / OAuth-app credentials are admin-only now (app_config/global
+in Firestore, GET/POST /api/v1/admin/settings in admin.py) - every user's
+jobs share them. Engine pause/resume and the global auto-mode kill switch
+are admin-only too, for the same reason: letting any signed-up user touch
+either would be a straightforward abuse vector.
 """
 
 import os
@@ -42,105 +44,48 @@ def _uid(request: Request) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Settings
+# Business profile (per user - not API keys, see admin.py for those)
 # --------------------------------------------------------------------------- #
-def _first(value):
-    if isinstance(value, list):
-        return value[0] if value else ""
-    return value or ""
-
-
-def _settings_response(settings: dict) -> dict:
+def _profile_response(profile: dict) -> dict:
     return {
-        "video_source": settings.get("video_source", "pexels"),
-        "pexels_api_key": _first(settings.get("pexels_api_keys", [])),
-        "pixabay_api_key": _first(settings.get("pixabay_api_keys", [])),
-        "extra_token": settings.get("extra_token", ""),
-        "llm_provider": settings.get("llm_provider", "groq"),
-        "groq_api_key": settings.get("groq_api_key", ""),
-        "groq_model_name": settings.get("groq_model_name", "llama-3.3-70b-versatile"),
-        "grok_api_key": settings.get("grok_api_key", ""),
-        "grok_model_name": settings.get("grok_model_name", "grok-4.3"),
-        "openai_api_key": settings.get("openai_api_key", ""),
-        "openai_base_url": settings.get("openai_base_url", ""),
-        "openai_model_name": settings.get("openai_model_name", "gpt-4o-mini"),
-        # generation defaults
-        "voice_name": settings.get("voice_name", "en-US-AndrewNeural-Male"),
-        "video_aspect": settings.get("video_aspect", "9:16"),
-        "subtitle_enabled": settings.get("subtitle_enabled", True),
-        "font_size": settings.get("font_size", 60),
-        "subtitle_position": settings.get("subtitle_position", "bottom"),
-        "paragraph_number": settings.get("paragraph_number", 1),
-        "video_clip_duration": settings.get("video_clip_duration", 5),
-        "bgm_type": settings.get("bgm_type", "random"),
-        # publishing
-        "youtube_client_id": settings.get("youtube_client_id", ""),
-        "youtube_client_secret": settings.get("youtube_client_secret", ""),
-        "youtube_privacy": settings.get("youtube_privacy", "public"),
-        "tiktok_client_key": settings.get("tiktok_client_key", ""),
-        "tiktok_client_secret": settings.get("tiktok_client_secret", ""),
-        "publish_base_url": settings.get("publish_base_url", "http://localhost:8080"),
-        "auto_publish": settings.get("auto_publish", False),
-        "auto_publish_platforms": settings.get("auto_publish_platforms", []),
-        "auto_mode": settings.get("auto_mode", False),
+        "business_name": profile.get("business_name", ""),
+        "business_address": profile.get("business_address", ""),
+        "business_website": profile.get("business_website", ""),
+        "business_email": profile.get("business_email", ""),
+        "business_bio": profile.get("business_bio", ""),
+        "auto_publish": profile.get("auto_publish", False),
+        "auto_publish_platforms": profile.get("auto_publish_platforms", []),
+        "youtube_privacy": profile.get("youtube_privacy", "public"),
+        "auto_mode": profile.get("auto_mode", False),
     }
 
 
-class SettingsBody(BaseModel):
-    video_source: Optional[str] = None
-    pexels_api_key: Optional[str] = None
-    pixabay_api_key: Optional[str] = None
-    extra_token: Optional[str] = None
-    llm_provider: Optional[str] = None
-    groq_api_key: Optional[str] = None
-    groq_model_name: Optional[str] = None
-    grok_api_key: Optional[str] = None
-    grok_model_name: Optional[str] = None
-    openai_api_key: Optional[str] = None
-    openai_base_url: Optional[str] = None
-    openai_model_name: Optional[str] = None
-    voice_name: Optional[str] = None
-    video_aspect: Optional[str] = None
-    subtitle_enabled: Optional[bool] = None
-    font_size: Optional[int] = None
-    subtitle_position: Optional[str] = None
-    paragraph_number: Optional[int] = None
-    video_clip_duration: Optional[int] = None
-    bgm_type: Optional[str] = None
-    # publishing
-    youtube_client_id: Optional[str] = None
-    youtube_client_secret: Optional[str] = None
-    youtube_privacy: Optional[str] = None
-    tiktok_client_key: Optional[str] = None
-    tiktok_client_secret: Optional[str] = None
-    publish_base_url: Optional[str] = None
+class ProfileBody(BaseModel):
+    business_name: Optional[str] = None
+    business_address: Optional[str] = None
+    business_website: Optional[str] = None
+    business_email: Optional[str] = None
+    business_bio: Optional[str] = None
     auto_publish: Optional[bool] = None
     auto_publish_platforms: Optional[list] = None
+    youtube_privacy: Optional[str] = None
 
 
-@router.get("/saas/settings", summary="Get this user's dashboard settings")
-def get_settings(request: Request):
-    settings = firestore_db.get_user_settings(_uid(request))
-    return utils.get_response(200, _settings_response(settings))
+@router.get("/saas/profile", summary="Get this user's business profile")
+def get_profile(request: Request):
+    profile = firestore_db.get_user_profile(_uid(request))
+    return utils.get_response(200, _profile_response(profile))
 
 
-@router.post("/saas/settings", summary="Save this user's dashboard settings")
-def save_settings(request: Request, body: SettingsBody):
+@router.post("/saas/profile", summary="Save this user's business profile")
+def save_profile(request: Request, body: ProfileBody):
     uid = _uid(request)
-    settings = firestore_db.get_user_settings(uid)
+    profile = firestore_db.get_user_profile(uid)
     data = body.model_dump(exclude_none=True)
-
-    if "pexels_api_key" in data:
-        key = data.pop("pexels_api_key").strip()
-        settings["pexels_api_keys"] = [key] if key else []
-    if "pixabay_api_key" in data:
-        key = data.pop("pixabay_api_key").strip()
-        settings["pixabay_api_keys"] = [key] if key else []
-
-    settings.update(data)
-    firestore_db.save_user_settings(uid, settings)
-    logger.info(f"settings saved for {uid}")
-    return utils.get_response(200, _settings_response(settings))
+    profile.update(data)
+    firestore_db.save_user_profile(uid, profile)
+    logger.info(f"profile saved for {uid}")
+    return utils.get_response(200, _profile_response(profile))
 
 
 # --------------------------------------------------------------------------- #
@@ -163,24 +108,30 @@ class JobBody(BaseModel):
     subtitle_position: Optional[str] = None
 
 
-def _build_params(settings: dict, body: JobBody) -> dict:
+def _build_params(global_settings: dict, body: JobBody, profile: dict = None) -> dict:
+    script_prompt = saas.SCRIPT_LENGTH_PROMPT
+    if not (body.video_script or "").strip():
+        # Only relevant when the pipeline will auto-write the script itself.
+        business_context = saas._business_context_prompt(profile) if profile else ""
+        if business_context:
+            script_prompt = script_prompt + " " + business_context
     raw = {
         "video_subject": body.video_subject.strip(),
         "video_script": (body.video_script or "").strip(),
         "video_terms": (body.video_terms or "").strip() or None,
-        "video_source": body.video_source or settings.get("video_source", "pexels"),
-        "video_aspect": body.video_aspect or settings.get("video_aspect", "9:16"),
-        "voice_name": body.voice_name or settings.get("voice_name", "en-US-AndrewNeural-Male"),
-        "subtitle_enabled": settings.get("subtitle_enabled", True) if body.subtitle_enabled is None else body.subtitle_enabled,
-        "video_clip_duration": body.video_clip_duration or settings.get("video_clip_duration", 5),
-        "paragraph_number": body.paragraph_number or settings.get("paragraph_number", saas.DEFAULT_PARAGRAPHS),
+        "video_source": body.video_source or global_settings.get("video_source", "pexels"),
+        "video_aspect": body.video_aspect or global_settings.get("video_aspect", "9:16"),
+        "voice_name": body.voice_name or global_settings.get("voice_name", "en-US-AndrewNeural-Male"),
+        "subtitle_enabled": global_settings.get("subtitle_enabled", True) if body.subtitle_enabled is None else body.subtitle_enabled,
+        "video_clip_duration": body.video_clip_duration or global_settings.get("video_clip_duration", 5),
+        "paragraph_number": body.paragraph_number or global_settings.get("paragraph_number", saas.DEFAULT_PARAGRAPHS),
         "video_count": body.video_count or 1,
-        "bgm_type": body.bgm_type or settings.get("bgm_type", "random"),
-        "font_size": body.font_size or settings.get("font_size", 60),
-        "subtitle_position": body.subtitle_position or settings.get("subtitle_position", "bottom"),
-        "font_name": settings.get("font_name", "MicrosoftYaHeiBold.ttc"),
-        "text_fore_color": settings.get("text_fore_color", "#FFFFFF"),
-        "video_script_prompt": saas.SCRIPT_LENGTH_PROMPT,
+        "bgm_type": body.bgm_type or global_settings.get("bgm_type", "random"),
+        "font_size": body.font_size or global_settings.get("font_size", 60),
+        "subtitle_position": body.subtitle_position or global_settings.get("subtitle_position", "bottom"),
+        "font_name": global_settings.get("font_name", "MicrosoftYaHeiBold.ttc"),
+        "text_fore_color": global_settings.get("text_fore_color", "#FFFFFF"),
+        "video_script_prompt": script_prompt,
     }
     # Validate against the real schema; raises on bad input.
     return VideoParams(**raw).model_dump()
@@ -194,7 +145,7 @@ def list_jobs(request: Request):
     for j in jobs:
         counts[j["status"]] = counts.get(j["status"], 0) + 1
     status = saas.engine.status()
-    status["auto_mode"] = firestore_db.get_user_settings(uid).get("auto_mode", False)
+    status["auto_mode"] = firestore_db.get_user_profile(uid).get("auto_mode", False)
     return utils.get_response(200, {"jobs": jobs, "counts": counts, "engine": status})
 
 
@@ -203,9 +154,10 @@ def create_job(request: Request, body: JobBody):
     if not body.video_subject.strip():
         return utils.get_response(400, message="video_subject is required")
     uid = _uid(request)
-    settings = firestore_db.get_user_settings(uid)
+    global_settings = firestore_db.get_global_settings()
+    profile = firestore_db.get_user_profile(uid)
     try:
-        params = _build_params(settings, body)
+        params = _build_params(global_settings, body, profile)
     except Exception as e:
         return utils.get_response(400, message=f"invalid parameters: {e}")
     job = saas.create_job(uid, title=body.title or body.video_subject, params=params)
@@ -252,16 +204,16 @@ def retry_job(request: Request, job_id: str = Path(...)):
 def engine_status(request: Request):
     uid = _uid(request)
     status = saas.engine.status()
-    status["auto_mode"] = firestore_db.get_user_settings(uid).get("auto_mode", False)
+    status["auto_mode"] = firestore_db.get_user_profile(uid).get("auto_mode", False)
     return utils.get_response(200, status)
 
 
 @router.post("/saas/engine/auto/start", summary="Enable this user's auto-mode")
 def engine_auto_start(request: Request):
     uid = _uid(request)
-    settings = firestore_db.get_user_settings(uid)
-    settings["auto_mode"] = True
-    firestore_db.save_user_settings(uid, settings)
+    profile = firestore_db.get_user_profile(uid)
+    profile["auto_mode"] = True
+    firestore_db.save_user_profile(uid, profile)
     saas.engine.wake()
     status = saas.engine.status()
     status["auto_mode"] = True
@@ -271,9 +223,9 @@ def engine_auto_start(request: Request):
 @router.post("/saas/engine/auto/stop", summary="Disable this user's auto-mode")
 def engine_auto_stop(request: Request):
     uid = _uid(request)
-    settings = firestore_db.get_user_settings(uid)
-    settings["auto_mode"] = False
-    firestore_db.save_user_settings(uid, settings)
+    profile = firestore_db.get_user_profile(uid)
+    profile["auto_mode"] = False
+    firestore_db.save_user_profile(uid, profile)
     status = saas.engine.status()
     status["auto_mode"] = False
     return utils.get_response(200, status)
@@ -303,24 +255,23 @@ def _popup_close_html(message: str, ok: bool = True) -> HTMLResponse:
 def social_status(request: Request):
     uid = _uid(request)
     data = publish.status(uid)
-    settings = firestore_db.get_user_settings(uid)
+    profile = firestore_db.get_user_profile(uid)
     data["settings"] = {
-        "auto_publish": settings.get("auto_publish", False),
-        "auto_publish_platforms": settings.get("auto_publish_platforms", []),
-        "youtube_privacy": settings.get("youtube_privacy", "public"),
-        "publish_base_url": settings.get("publish_base_url", "http://localhost:8080"),
+        "auto_publish": profile.get("auto_publish", False),
+        "auto_publish_platforms": profile.get("auto_publish_platforms", []),
+        "youtube_privacy": profile.get("youtube_privacy", "public"),
+        "publish_base_url": firestore_db.get_global_settings().get("publish_base_url", "http://localhost:8080"),
     }
     return utils.get_response(200, data)
 
 
 @router.get("/saas/{platform}/connect", summary="Get the OAuth URL for a platform")
 def social_connect(request: Request, platform: str = Path(...)):
-    uid = _uid(request)
     try:
         if platform == "youtube":
-            url = publish.youtube_auth_url(uid)
+            url = publish.youtube_auth_url()
         elif platform == "tiktok":
-            url = publish.tiktok_auth_url(uid)
+            url = publish.tiktok_auth_url()
         else:
             return utils.get_response(400, message="unknown platform")
     except ValueError as e:
@@ -401,16 +352,21 @@ class GenScriptBody(BaseModel):
     paragraph_number: Optional[int] = 1
 
 
-@router.post("/saas/generate-script", summary="AI-generate a script")
+@router.post("/saas/generate-script", summary="AI-generate a script, branded for this user's business")
 def generate_script(request: Request, body: GenScriptBody):
     uid = _uid(request)
+    profile = firestore_db.get_user_profile(uid)
+    script_prompt = saas.SCRIPT_LENGTH_PROMPT
+    business_context = saas._business_context_prompt(profile)
+    if business_context:
+        script_prompt = script_prompt + " " + business_context
     try:
         with saas._user_config_scope(uid):
             script = llm.generate_script(
                 video_subject=body.video_subject,
                 language=body.video_language or "",
                 paragraph_number=body.paragraph_number or saas.DEFAULT_PARAGRAPHS,
-                video_script_prompt=saas.SCRIPT_LENGTH_PROMPT,
+                video_script_prompt=script_prompt,
             )
     except Exception as e:
         return utils.get_response(500, message=f"script generation failed: {e}")

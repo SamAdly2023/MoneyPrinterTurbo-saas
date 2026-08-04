@@ -44,6 +44,7 @@ def create_session(body: SessionBody):
         max_age=auth.MAX_AGE,
         httponly=True,
         samesite="lax",
+        secure=True,
     )
     return response
 

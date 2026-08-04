@@ -48,23 +48,23 @@ STATUS_PROCESSING = "processing"
 STATUS_DONE = "done"
 STATUS_FAILED = "failed"
 
-# Settings fields a user can configure via the dashboard, and where each one
-# lives in the process-wide config globals while a job is being scoped to
-# its owner. Shared with the settings controller so both stay in sync.
+# Admin-managed, shared by every user's jobs (app_config/global in Firestore).
 APP_STR_KEYS = {
     "video_source", "extra_token", "llm_provider",
     "groq_api_key", "groq_model_name", "grok_api_key", "grok_model_name",
     "openai_api_key", "openai_base_url", "openai_model_name",
-    "youtube_client_id", "youtube_client_secret", "youtube_privacy",
+    "youtube_client_id", "youtube_client_secret",
     "tiktok_client_key", "tiktok_client_secret", "publish_base_url",
 }
 APP_LIST_KEYS = {"pexels_api_keys", "pixabay_api_keys"}
-APP_OTHER_KEYS = {"auto_publish", "auto_publish_platforms"}
 UI_KEYS = {
     "voice_name", "video_aspect", "subtitle_enabled", "font_size",
     "subtitle_position", "paragraph_number", "video_clip_duration", "bgm_type",
     "font_name", "text_fore_color",
 }
+# Per-business (this job's owner's own profile), not shared.
+PROFILE_APP_KEYS = {"youtube_privacy"}
+APP_OTHER_KEYS = {"auto_publish", "auto_publish_platforms"}
 
 
 def _now_iso() -> str:
@@ -144,29 +144,34 @@ _config_scope_lock = threading.RLock()
 
 @contextlib.contextmanager
 def _user_config_scope(uid: str):
-    """Temporarily overlay one user's settings onto the shared config globals.
+    """Overlay the shared global settings + this job owner's business profile
+    onto the shared config globals for the duration of the block.
 
     Every scoped key is reset to a blank baseline first (not just merged),
-    so a previous user's job can never leak a value into the next one.
+    so a previous job can never leak a value into the next one. Yields the
+    owner's profile dict (business name/site/bio etc.) for prompt injection.
     """
     _config_scope_lock.acquire()
-    settings = firestore_db.get_user_settings(uid)
+    global_settings = firestore_db.get_global_settings()
+    profile = firestore_db.get_user_profile(uid)
 
-    snapshot_app = {k: config.app.get(k) for k in APP_STR_KEYS | APP_LIST_KEYS | APP_OTHER_KEYS}
+    snapshot_app = {k: config.app.get(k) for k in APP_STR_KEYS | APP_LIST_KEYS | PROFILE_APP_KEYS | APP_OTHER_KEYS}
     snapshot_ui = {k: config.ui.get(k) for k in UI_KEYS}
 
     try:
         for k in APP_STR_KEYS:
-            config.app[k] = settings.get(k, "")
+            config.app[k] = global_settings.get(k, "")
         for k in APP_LIST_KEYS:
-            v = settings.get(k) or []
+            v = global_settings.get(k) or []
             config.app[k] = [v] if isinstance(v, str) and v else (v if isinstance(v, list) else [])
+        for k in PROFILE_APP_KEYS:
+            config.app[k] = profile.get(k, "")
         for k in APP_OTHER_KEYS:
-            config.app[k] = settings.get(k, False if k == "auto_publish" else [])
+            config.app[k] = profile.get(k, False if k == "auto_publish" else [])
         for k in UI_KEYS:
-            if k in settings:
-                config.ui[k] = settings[k]
-        yield settings
+            if k in global_settings:
+                config.ui[k] = global_settings[k]
+        yield profile
     finally:
         for k, v in snapshot_app.items():
             if v is None:
@@ -179,6 +184,31 @@ def _user_config_scope(uid: str):
             else:
                 config.ui[k] = v
         _config_scope_lock.release()
+
+
+def _business_context_prompt(profile: dict) -> str:
+    """Short instruction block steering generated scripts/metadata toward one
+    business's branding. Empty if no business_name is set, so unbranded/admin
+    test jobs aren't forced to mention a business that doesn't exist."""
+    name = (profile or {}).get("business_name", "").strip()
+    if not name:
+        return ""
+    website = (profile.get("business_website") or "").strip()
+    email = (profile.get("business_email") or "").strip()
+    address = (profile.get("business_address") or "").strip()
+    bio = (profile.get("business_bio") or "").strip()
+    contact_bits = [b for b in (website, email, address) if b]
+    lines = [f'This video is being made for the business "{name}".']
+    if contact_bits:
+        lines.append("Contact: " + ", ".join(contact_bits) + ".")
+    if bio:
+        lines.append(f"About the business: {bio}.")
+    lines.append(
+        "Where it fits naturally with the video's topic, weave in the business "
+        "name and a brief call-to-action mentioning the website or contact info - "
+        "the way a real local-business ad would, not as a forced disclaimer."
+    )
+    return " ".join(lines)
 
 
 # --------------------------------------------------------------------------- #
@@ -207,10 +237,14 @@ AUTO_CATEGORIES = [
 ]
 
 
-def build_default_params(subject: str, script: str = "", terms: str = "") -> dict:
+def build_default_params(subject: str, script: str = "", terms: str = "", profile: dict = None) -> dict:
     """Build a validated VideoParams dict from the current defaults in config."""
     ui = config.ui
     app = config.app
+    script_prompt = SCRIPT_LENGTH_PROMPT
+    business_context = _business_context_prompt(profile) if profile else ""
+    if business_context:
+        script_prompt = script_prompt + " " + business_context
     raw = {
         "video_subject": (subject or "").strip(),
         "video_script": (script or "").strip(),
@@ -227,8 +261,9 @@ def build_default_params(subject: str, script: str = "", terms: str = "") -> dic
         "subtitle_position": ui.get("subtitle_position", "bottom"),
         "font_name": ui.get("font_name", "MicrosoftYaHeiBold.ttc"),
         "text_fore_color": ui.get("text_fore_color", "#FFFFFF"),
-        # Steers length when the pipeline generates the script from a subject.
-        "video_script_prompt": SCRIPT_LENGTH_PROMPT,
+        # Steers length (and, if set, this business's branding) when the
+        # pipeline generates the script from a subject.
+        "video_script_prompt": script_prompt,
     }
     return VideoParams(**raw).model_dump()
 
@@ -247,12 +282,27 @@ def _parse_idea_json(text: str) -> dict:
     return json.loads(match.group(0))
 
 
-def generate_viral_idea() -> dict:
-    """Ask the configured LLM for one fresh viral Shorts idea + script."""
-    category = random.choice(AUTO_CATEGORIES)
+def generate_viral_idea(profile: dict = None) -> dict:
+    """Ask the configured LLM for one fresh viral Shorts idea + script.
+
+    When the job owner has a business profile set, steer the topic toward
+    their own industry (using their bio) instead of a fully random category,
+    and weave in their branding/CTA.
+    """
+    profile = profile or {}
+    bio = (profile.get("business_bio") or "").strip()
+    if bio:
+        topic_line = (
+            "Invent ONE fresh, surprising idea directly relevant to this business's "
+            f"industry/expertise, described as: {bio}\n\n"
+        )
+    else:
+        category = random.choice(AUTO_CATEGORIES)
+        topic_line = f"Invent ONE fresh, surprising idea about: {category}.\n\n"
+    business_context = _business_context_prompt(profile)
     prompt = (
         "You are a viral short-form video scriptwriter for YouTube Shorts, TikTok and Reels.\n"
-        f"Invent ONE fresh, surprising idea about: {category}.\n\n"
+        + topic_line +
         "Write the NARRATION using this proven viral structure:\n"
         "1) HOOK: open with one bold, curiosity-provoking claim or question that stops the scroll "
         "(e.g. 'Your memory is lying to you', 'Your cheap clothes are hiding a disaster').\n"
@@ -261,6 +311,7 @@ def generate_viral_idea() -> dict:
         "'Save this for your next test', 'Follow to see behind the curtain').\n"
         "The narration must be 130-170 words (about 40-80 seconds spoken), conversational and punchy, "
         "with NO emojis, NO hashtags and NO scene directions.\n\n"
+        + (business_context + "\n\n" if business_context else "") +
         "Return ONLY valid minified JSON (no markdown, no commentary) with exactly these keys:\n"
         '{"title": "short clean topic label, 3-6 words, no emojis", '
         '"subject": "the core topic in a few words", '
@@ -287,19 +338,21 @@ def generate_viral_idea() -> dict:
     return {"title": title, "subject": subject, "script": script, "keywords": keywords}
 
 
-def generate_viral_job(uid: str) -> dict:
-    idea = generate_viral_idea()
-    params = build_default_params(idea["subject"], idea["script"], idea["keywords"])
+def generate_viral_job(uid: str, profile: dict = None) -> dict:
+    idea = generate_viral_idea(profile)
+    params = build_default_params(idea["subject"], idea["script"], idea["keywords"], profile=profile)
     return create_job(uid, title=idea["title"], params=params, auto=True)
 
 
-def generate_publish_metadata(subject: str, script: str) -> dict:
+def generate_publish_metadata(subject: str, script: str, profile: dict = None) -> dict:
     """Generate cross-platform publishing metadata (title, description, tags)."""
+    business_context = _business_context_prompt(profile) if profile else ""
     prompt = (
         "You are a viral social media manager. Write publishing metadata for a short "
         "vertical video for YouTube Shorts, TikTok, Instagram Reels, Facebook, X and Pinterest.\n"
         f"Video topic: {subject}\n"
         f"Narration: {script}\n\n"
+        + (business_context + "\n\n" if business_context else "") +
         "Match this proven viral style exactly:\n"
         "- title: catchy and curiosity-driven, under 90 characters, ending with 1-2 relevant emojis "
         "(e.g. 'The Mandela Effect Proves Reality is Broken \U0001F633\U0001F300').\n"
@@ -449,8 +502,8 @@ class Engine:
             return False
         uid = user["uid"]
         try:
-            with _user_config_scope(uid):
-                job = generate_viral_job(uid)
+            with _user_config_scope(uid) as profile:
+                job = generate_viral_job(uid, profile)
             firestore_db.mark_auto_generated(uid)
             logger.success(f"auto-mode created job {job['id']} for {uid} - {job['title']}")
             return True
@@ -516,8 +569,8 @@ class Engine:
             meta = {}
             meta_file = ""
             try:
-                with _user_config_scope(uid):
-                    meta = generate_publish_metadata(subject, final_script)
+                with _user_config_scope(uid) as profile:
+                    meta = generate_publish_metadata(subject, final_script, profile)
                 meta_file = _write_publish_file(job_id, meta)
             except Exception as e:  # never fail a rendered video over metadata
                 logger.warning(f"job {job_id}: metadata generation failed: {e}")

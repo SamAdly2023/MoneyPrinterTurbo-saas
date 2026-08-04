@@ -51,20 +51,22 @@ def find_uid_by_email(email: str) -> str:
     )
 
 
-def migrate_settings(uid: str, config_toml_path: str):
+def migrate_settings(config_toml_path: str):
+    """These were always API/integration keys, which now live in the shared
+    app_config/global doc rather than any one user's profile."""
     data = toml.load(config_toml_path)
     app_cfg = data.get("app", {})
     ui_cfg = data.get("ui", {})
 
-    settings = firestore_db.get_user_settings(uid)
+    settings = firestore_db.get_global_settings()
     for k in _APP_KEYS:
         if k in app_cfg:
             settings[k] = app_cfg[k]
     for k in _UI_KEYS:
         if k in ui_cfg:
             settings[k] = ui_cfg[k]
-    firestore_db.save_user_settings(uid, settings)
-    print(f"imported settings for {uid}")
+    firestore_db.save_global_settings(settings)
+    print("imported settings into app_config/global")
 
 
 def migrate_jobs(uid: str, jobs_json_path: str):
@@ -98,7 +100,7 @@ def main():
     print(f"migrating legacy data into uid={uid} ({args.email})")
 
     if args.config_toml:
-        migrate_settings(uid, args.config_toml)
+        migrate_settings(args.config_toml)
     if args.jobs_json:
         migrate_jobs(uid, args.jobs_json)
     if args.social_json:

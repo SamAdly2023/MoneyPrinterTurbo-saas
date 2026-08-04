@@ -185,7 +185,7 @@ function renderUsers(){
       <td class="muted">${esc(u.provider||"")}</td>
       <td class="muted">${fmtDate(u.created_at)}</td>
       <td>${u.job_count||0}</td>
-      <td><span class="pill ${u.settings&&u.settings.auto_mode?"on":"off"}">${u.settings&&u.settings.auto_mode?"ON":"off"}</span></td>
+      <td><span class="pill ${u.profile&&u.profile.auto_mode?"on":"off"}">${u.profile&&u.profile.auto_mode?"ON":"off"}</span></td>
       <td><span class="pill ${u.is_disabled?"failed":"done"}">${u.is_disabled?"Disabled":"Active"}</span></td>
       <td><button class="btn sm ${u.is_disabled?"":"danger"}" onclick="toggleUser('${u.uid}',${!u.is_disabled})">${u.is_disabled?"Enable":"Disable"}</button></td>
     </tr>`).join("");

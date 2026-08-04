@@ -6,11 +6,13 @@ Direct social publishing (no third-party aggregator), per user.
   auto-posting requires TikTok to audit your app; until then videos land in
   your TikTok drafts and you tap "Post" in the app.
 
-OAuth client credentials and tokens are read/written straight from each
-user's Firestore document (never the shared `config` globals) - these
-functions can be called from a normal HTTP request at any time, potentially
-concurrently with the engine processing a *different* user's job, so they
-must not depend on the engine's temporary config-scope overlay.
+OAuth **client** credentials (app-level id/secret) are shared/admin-managed
+(app_config/global in Firestore) - every business uses the same registered
+OAuth app. The **connected token** for each platform, and the per-business
+upload-privacy preference, are per-user. None of this reads the engine's
+temporary config-scope overlay (app/services/saas.py's _user_config_scope) -
+these functions can be called from a normal HTTP request at any time,
+potentially concurrently with the engine processing a *different* user's job.
 """
 
 import json
@@ -30,28 +32,28 @@ YT_SCOPE = (
 TT_SCOPE = "user.info.basic,video.upload"
 
 
-def _settings(uid: str) -> dict:
-    return firestore_db.get_user_settings(uid)
+def _global() -> dict:
+    return firestore_db.get_global_settings()
 
 
-def base_url(uid: str) -> str:
-    return (_settings(uid).get("publish_base_url") or "http://localhost:8080").rstrip("/")
+def base_url() -> str:
+    return (_global().get("publish_base_url") or "http://localhost:8080").rstrip("/")
 
 
-def _redirect_uri(uid: str, platform: str) -> str:
-    return f"{base_url(uid)}/api/v1/saas/{platform}/callback"
+def _redirect_uri(platform: str) -> str:
+    return f"{base_url()}/api/v1/saas/{platform}/callback"
 
 
 # --------------------------------------------------------------------------- #
 # YouTube
 # --------------------------------------------------------------------------- #
-def youtube_auth_url(uid: str) -> str:
-    client_id = _settings(uid).get("youtube_client_id", "")
+def youtube_auth_url() -> str:
+    client_id = _global().get("youtube_client_id", "")
     if not client_id:
-        raise ValueError("YouTube client ID is not set. Add it in Settings first.")
+        raise ValueError("YouTube client ID is not set. Ask the admin to add it in Settings.")
     params = {
         "client_id": client_id,
-        "redirect_uri": _redirect_uri(uid, "youtube"),
+        "redirect_uri": _redirect_uri("youtube"),
         "response_type": "code",
         "scope": YT_SCOPE,
         "access_type": "offline",
@@ -62,14 +64,14 @@ def youtube_auth_url(uid: str) -> str:
 
 
 def youtube_exchange_code(uid: str, code: str) -> dict:
-    settings = _settings(uid)
+    settings = _global()
     resp = requests.post(
         "https://oauth2.googleapis.com/token",
         data={
             "code": code,
             "client_id": settings.get("youtube_client_id", ""),
             "client_secret": settings.get("youtube_client_secret", ""),
-            "redirect_uri": _redirect_uri(uid, "youtube"),
+            "redirect_uri": _redirect_uri("youtube"),
             "grant_type": "authorization_code",
         },
         timeout=30,
@@ -95,7 +97,7 @@ def _youtube_refresh(uid: str) -> str:
     info = firestore_db.get_user_social(uid).get("youtube", {})
     if not info.get("refresh_token"):
         raise ValueError("YouTube is not connected")
-    settings = _settings(uid)
+    settings = _global()
     resp = requests.post(
         "https://oauth2.googleapis.com/token",
         data={
@@ -190,22 +192,22 @@ def youtube_status(uid: str) -> dict:
 # --------------------------------------------------------------------------- #
 # TikTok
 # --------------------------------------------------------------------------- #
-def tiktok_auth_url(uid: str) -> str:
-    client_key = _settings(uid).get("tiktok_client_key", "")
+def tiktok_auth_url() -> str:
+    client_key = _global().get("tiktok_client_key", "")
     if not client_key:
-        raise ValueError("TikTok client key is not set. Add it in Settings first.")
+        raise ValueError("TikTok client key is not set. Ask the admin to add it in Settings.")
     params = {
         "client_key": client_key,
         "scope": TT_SCOPE,
         "response_type": "code",
-        "redirect_uri": _redirect_uri(uid, "tiktok"),
+        "redirect_uri": _redirect_uri("tiktok"),
         "state": "mpt",
     }
     return "https://www.tiktok.com/v2/auth/authorize/?" + urllib.parse.urlencode(params)
 
 
 def tiktok_exchange_code(uid: str, code: str) -> dict:
-    settings = _settings(uid)
+    settings = _global()
     resp = requests.post(
         "https://open.tiktokapis.com/v2/oauth/token/",
         data={
@@ -213,7 +215,7 @@ def tiktok_exchange_code(uid: str, code: str) -> dict:
             "client_secret": settings.get("tiktok_client_secret", ""),
             "code": code,
             "grant_type": "authorization_code",
-            "redirect_uri": _redirect_uri(uid, "tiktok"),
+            "redirect_uri": _redirect_uri("tiktok"),
         },
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=30,
@@ -237,7 +239,7 @@ def _tiktok_refresh(uid: str) -> str:
     info = firestore_db.get_user_social(uid).get("tiktok", {})
     if not info.get("refresh_token"):
         raise ValueError("TikTok is not connected")
-    settings = _settings(uid)
+    settings = _global()
     resp = requests.post(
         "https://open.tiktokapis.com/v2/oauth/token/",
         data={
@@ -340,13 +342,13 @@ def publish_video(uid: str, video_path: str, meta: dict, platforms: list) -> dic
     title = (meta or {}).get("title") or ""
     description = (meta or {}).get("description") or ""
     tags = (meta or {}).get("tags") or []
-    settings = _settings(uid)
+    profile = firestore_db.get_user_profile(uid)
     results = {}
     if "youtube" in platforms:
         try:
             results["youtube"] = youtube_upload(
                 uid, video_path, title, description, tags,
-                privacy=settings.get("youtube_privacy", "public"),
+                privacy=profile.get("youtube_privacy", "public"),
             )
         except Exception as e:  # noqa: BLE001 - surface any API error to the UI
             logger.error(f"youtube publish failed: {e}")
