@@ -1,0 +1,15 @@
+{
+  "hosting": {
+    "site": "vidzy",
+    "public": "firebase-hosting-public",
+    "rewrites": [
+      {
+        "source": "**",
+        "run": {
+          "serviceId": "moneyprinterturbo",
+          "region": "us-central1"
+        }
+      }
+    ]
+  }
+}

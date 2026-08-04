@@ -27,6 +27,7 @@ node_modules
 venv/
 .venv
 /MoneyPrinterTurbo-main/
+/.firebase/
 
 # Debug and test files
 CLAUDE.md
