@@ -24,7 +24,9 @@ from app.services import firestore_db
 
 ADMIN_EMAILS = {"samadly728@gmail.com"}
 
-COOKIE_NAME = "mpt_auth"
+# Must be named exactly "__session" - Firebase Hosting's rewrite proxy to
+# Cloud Run strips every other cookie name before forwarding the request.
+COOKIE_NAME = "__session"
 MAX_AGE = 60 * 60 * 24 * 30  # 30 days
 
 
