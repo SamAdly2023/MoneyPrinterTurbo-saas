@@ -78,4 +78,5 @@ def get_current_user(request: Request) -> dict | None:
     if not user or user.get("is_disabled"):
         return None
     email = (user.get("email") or "").lower()
-    return {"uid": uid, "email": email, "is_admin": email in ADMIN_EMAILS}
+    is_owner = email in ADMIN_EMAILS
+    return {"uid": uid, "email": email, "is_admin": is_owner or bool(user.get("is_admin")), "is_owner": is_owner}

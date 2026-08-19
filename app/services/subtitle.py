@@ -1,6 +1,7 @@
 import json
 import os.path
 import re
+import threading
 from timeit import default_timer as timer
 
 try:
@@ -16,6 +17,15 @@ model_size = config.whisper.get("model_size", "large-v3")
 device = config.whisper.get("device", "cpu")
 compute_type = config.whisper.get("compute_type", "int8")
 model = None
+# One shared model instance is reused across every render worker (avoids
+# loading multiple multi-GB copies into memory). ctranslate2/faster-whisper
+# doesn't guarantee concurrent .transcribe() calls on one model instance are
+# safe, so this lock also serializes the lazy first-load itself (otherwise
+# two worker threads racing to load simultaneously would double the memory
+# spike and could stomp on the same download_root). Everything else in the
+# render pipeline (LLM calls, footage downloads, ffmpeg encoding, TTS) still
+# runs fully in parallel across workers - only this one shared resource is serialized.
+_model_lock = threading.Lock()
 
 
 def create(audio_file, subtitle_file: str = ""):
@@ -23,41 +33,59 @@ def create(audio_file, subtitle_file: str = ""):
     if WhisperModel is None:
         logger.warning("faster_whisper not available, skipping whisper subtitle generation")
         return ""
-    if not model:
-        model_path = f"{utils.root_dir()}/models/whisper-{model_size}"
-        model_bin_file = f"{model_path}/model.bin"
-        if not os.path.isdir(model_path) or not os.path.isfile(model_bin_file):
-            model_path = model_size
 
-        logger.info(
-            f"loading model: {model_path}, device: {device}, compute_type: {compute_type}"
+    with _model_lock:
+        if not model:
+            model_path = f"{utils.root_dir()}/models/whisper-{model_size}"
+            model_bin_file = f"{model_path}/model.bin"
+            if not os.path.isdir(model_path) or not os.path.isfile(model_bin_file):
+                model_path = model_size
+
+            # Cache the downloaded model under persistent storage rather than the
+            # container's default (ephemeral) HF cache dir - on Cloud Run every
+            # cold start otherwise re-downloads the multi-GB model from
+            # HuggingFace from scratch, and any transient network hiccup during
+            # that download permanently breaks subtitle generation for that
+            # instance's lifetime. Once one download succeeds, it survives restarts.
+            download_root = os.path.join(utils.storage_dir("whisper_models", create=True))
+
+            logger.info(
+                f"loading model: {model_path}, device: {device}, compute_type: {compute_type}"
+            )
+            try:
+                model = WhisperModel(
+                    model_size_or_path=model_path, device=device, compute_type=compute_type,
+                    download_root=download_root,
+                )
+            except Exception as e:
+                logger.error(
+                    f"failed to load model: {e} \n\n"
+                    f"********************************************\n"
+                    f"this may be caused by network issue. \n"
+                    f"please download the model manually and put it in the 'models' folder. \n"
+                    f"see [README.md FAQ](https://github.com/harry0703/MoneyPrinterTurbo) for more details.\n"
+                    f"********************************************\n\n"
+                )
+                return None
+
+        logger.info(f"start, output file: {subtitle_file}")
+        if not subtitle_file:
+            subtitle_file = f"{audio_file}.srt"
+
+        segments, info = model.transcribe(
+            audio_file,
+            beam_size=5,
+            word_timestamps=True,
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=500),
         )
-        try:
-            model = WhisperModel(
-                model_size_or_path=model_path, device=device, compute_type=compute_type
-            )
-        except Exception as e:
-            logger.error(
-                f"failed to load model: {e} \n\n"
-                f"********************************************\n"
-                f"this may be caused by network issue. \n"
-                f"please download the model manually and put it in the 'models' folder. \n"
-                f"see [README.md FAQ](https://github.com/harry0703/MoneyPrinterTurbo) for more details.\n"
-                f"********************************************\n\n"
-            )
-            return None
-
-    logger.info(f"start, output file: {subtitle_file}")
-    if not subtitle_file:
-        subtitle_file = f"{audio_file}.srt"
-
-    segments, info = model.transcribe(
-        audio_file,
-        beam_size=5,
-        word_timestamps=True,
-        vad_filter=True,
-        vad_parameters=dict(min_silence_duration_ms=500),
-    )
+        # transcribe() returns segments as a lazy generator - the actual
+        # inference happens while this is iterated, not at the call above.
+        # Materialize it now, still inside the lock, so the real work stays
+        # serialized; everything after this line is pure Python post-
+        # processing of an already-finished result and can safely run
+        # without holding the lock.
+        segments = list(segments)
 
     logger.info(
         f"detected language: '{info.language}', probability: {info.language_probability:.2f}"

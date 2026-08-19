@@ -241,7 +241,7 @@ def _generate_response(prompt: str) -> str:
                 api_key = config.app.get("groq_api_key")
                 model_name = config.app.get("groq_model_name")
                 if not model_name:
-                    model_name = "llama-3.3-70b-versatile"
+                    model_name = "openai/gpt-oss-120b"
                 base_url = config.app.get("groq_base_url", "")
                 if not base_url:
                     base_url = "https://api.groq.com/openai/v1"
@@ -762,6 +762,7 @@ def generate_terms(
     video_script: str,
     amount: int = 5,
     match_script_order: bool = False,
+    business_context: str = "",
 ) -> List[str]:
     if match_script_order:
         goal = (
@@ -794,6 +795,17 @@ def generate_terms(
             '"search term 4", "search term 5"]'
         )
 
+    business_rule = ""
+    if business_context:
+        business_rule = (
+            f"6. this video is for {business_context} - EVERY term must depict a scene "
+            "unmistakably from that same trade/industry (a worker performing it, its tools "
+            "or materials, a job site, a finished result), never a generic scene unrelated "
+            "to it. At the same time, phrase each term the way real stock-footage libraries "
+            "label their clips (a common, widely-filmed scene) rather than obscure trade "
+            "jargon they are unlikely to carry."
+        )
+
     prompt = f"""
 # Role: Video Search Terms Generator
 
@@ -807,6 +819,7 @@ def generate_terms(
 4. the search terms must be related to the subject of the video.
 5. reply with english search terms only.
 {ordering_rule}
+{business_rule}
 
 ## Output Example:
 {output_example}
@@ -860,6 +873,74 @@ Please note that you must use English for generating video search terms; Chinese
 
     logger.success(f"completed: \n{search_terms}")
     return search_terms
+
+
+# =============================================================================
+# Long-form clipping: pick highlight segments from a timestamped transcript
+# =============================================================================
+def generate_highlight_segments(
+    transcript: str, clip_count: int, total_duration: float,
+    min_len: float = 20.0, max_len: float = 75.0,
+) -> list:
+    """Ask the LLM to pick the best short-form highlight segments from a
+    timestamped transcript. Returns a list of
+    {"start": float, "end": float, "title": str} dicts, oldest to newest.
+    Raises on total LLM/parse failure - the caller falls back to an evenly
+    spaced heuristic so clipping still works without a configured LLM.
+    """
+    prompt = f"""
+# Role: Short-form Video Editor
+
+## Goal:
+Given the timestamped transcript of a long-form video, pick the {clip_count} most
+engaging, self-contained moments to turn into short vertical clips (like YouTube
+Shorts / TikTok). Prioritize hooks, punchlines, surprising facts, emotional peaks,
+and complete thoughts - never cut off mid-sentence.
+
+## Constraints:
+1. Each clip must be between {min_len:.0f} and {max_len:.0f} seconds long.
+2. Clips must not overlap, and must fall within 0 and {total_duration:.0f} seconds.
+3. Return ONLY a valid minified JSON array, no markdown, no commentary.
+4. Each item must have exactly these keys: "start" (number, seconds), "end" (number,
+   seconds), "title" (short catchy string describing this moment).
+5. Return at most {clip_count} items. Order them by their position in the video.
+
+## Output example:
+[{{"start": 12.5, "end": 58.0, "title": "The plot twist nobody saw coming"}}]
+
+## Transcript (MM:SS format):
+{transcript}
+""".strip()
+
+    response = ""
+    for i in range(_max_retries):
+        try:
+            response = _generate_response(prompt)
+            if isinstance(response, str) and response.startswith("Error: "):
+                logger.error(f"failed to generate highlight segments: {response}")
+                continue
+            segments = json.loads(_strip_code_fence(response))
+            if not isinstance(segments, list) or not segments:
+                logger.warning("highlight segment response was not a non-empty list")
+                continue
+            cleaned = []
+            for seg in segments:
+                try:
+                    start = float(seg["start"])
+                    end = float(seg["end"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if end <= start or start < 0 or end > total_duration + 1:
+                    continue
+                cleaned.append({"start": start, "end": end, "title": str(seg.get("title") or "Highlight")})
+            if cleaned:
+                return cleaned[:clip_count]
+        except Exception as e:
+            logger.warning(f"failed to parse highlight segments: {str(e)}")
+        if i < _max_retries - 1:
+            logger.warning(f"failed to generate highlight segments, trying again... {i + 1}")
+
+    raise RuntimeError("LLM did not return usable highlight segments")
 
 
 # =============================================================================

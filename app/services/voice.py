@@ -1646,10 +1646,17 @@ def create_subtitle(sub_maker: SubMaker, text: str, subtitle_file: str):
             )
 
         if len(sub_items) != len(script_lines):
+            # A single unmatchable line (e.g. a business CTA sentence containing a bare
+            # URL like "masonryresto.com", which breaks edge-tts's cue tokenization)
+            # used to discard subtitles for the ENTIRE video. Any real matches are still
+            # correctly timed (they're only ever appended on a successful match), so
+            # writing the partial result - missing a caption for the unmatched tail
+            # instead of the whole video - is strictly better than no captions at all.
             logger.warning(
-                f"failed, sub_items len: {len(sub_items)}, script_lines len: {len(script_lines)}"
+                f"partial subtitle match, sub_items len: {len(sub_items)}, script_lines len: {len(script_lines)}"
             )
-            return
+            if not sub_items:
+                return
 
         _write_subtitle_items(sub_items, subtitle_file)
     except Exception as e:

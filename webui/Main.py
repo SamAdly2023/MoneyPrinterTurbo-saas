@@ -573,7 +573,7 @@ if not config.app.get("hide_config", False):
 
             if llm_provider == "groq":
                 if not llm_model_name:
-                    llm_model_name = "llama-3.3-70b-versatile"
+                    llm_model_name = "openai/gpt-oss-120b"
                 if not llm_base_url:
                     llm_base_url = "https://api.groq.com/openai/v1"
 
@@ -582,7 +582,7 @@ if not config.app.get("hide_config", False):
                             ##### Groq 配置说明
                             - **API Key**: [点击到官网申请](https://console.groq.com/keys)
                             - **Base Url**: 固定为 https://api.groq.com/openai/v1
-                            - **Model Name**: 比如 llama-3.3-70b-versatile
+                            - **Model Name**: 比如 openai/gpt-oss-120b
                             """
 
             if llm_provider == "deepseek":

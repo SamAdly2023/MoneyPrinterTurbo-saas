@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Admin - Vidzy</title>
-<link rel="icon" type="image/svg+xml" href="/logo.svg" />
+<link rel="icon" type="image/png" href="/logo-icon.png" />
 <style>
   :root{
     --bg:#0b0f19; --bg2:#0f1524; --panel:#141b2d; --panel2:#1a2338;
@@ -70,6 +70,39 @@
   .toast.ok{border-left-color:var(--green)} .toast.err{border-left-color:var(--red)}
   @keyframes slidein{from{transform:translateX(30px);opacity:0}to{transform:none;opacity:1}}
   @media(max-width:900px){.stats{grid-template-columns:1fr 1fr}}
+
+  .chart-bars{display:flex;align-items:flex-end;gap:6px;height:120px;margin-top:8px}
+  .chart-bars .bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
+  .chart-bars .bar{width:100%;max-width:26px;background:var(--grad);border-radius:5px 5px 2px 2px;min-height:2px}
+  .chart-bars .bar-label{font-size:10px;color:var(--faint);white-space:nowrap}
+  .pager{display:flex;align-items:center;gap:10px;justify-content:flex-end;margin-top:14px}
+  .pager .muted{font-size:12.5px}
+  .pill.role-admin{background:rgba(108,92,231,.18);color:var(--accent2)}
+  .pill.role-owner{background:rgba(245,158,11,.15);color:#f5c56b}
+  .pill.role-user{background:#1c2438;color:var(--faint)}
+
+  .modal-backdrop{position:fixed;inset:0;background:rgba(6,8,14,.6);display:flex;align-items:center;justify-content:center;z-index:60;padding:24px}
+  .modal{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);max-width:720px;width:100%;max-height:82vh;overflow:auto;padding:24px;box-shadow:var(--shadow)}
+  .modal h3{margin:0 0 4px}
+  .modal .close{float:right}
+  .video-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;margin-top:16px}
+  .video-grid .vcard{background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .video-grid video{width:100%;display:block;background:#000;aspect-ratio:9/16;object-fit:cover}
+  .video-grid .vcaption{padding:8px 10px;font-size:11.5px;color:var(--muted)}
+
+  .tabbar{display:flex;gap:22px;margin-bottom:24px;border-bottom:1px solid var(--border)}
+  .tab-btn{background:transparent;border:none;color:var(--muted);font-weight:700;font-size:13.5px;
+    padding:10px 2px;cursor:pointer;border-bottom:2px solid transparent;font-family:inherit}
+  .tab-btn.active{color:var(--text);border-bottom-color:var(--accent)}
+  .tab-btn:hover{color:var(--text)}
+  .tab-view{display:none}
+  .tab-view.active{display:block}
+  .src-bars{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+  .src-bar-row{display:flex;align-items:center;gap:10px;font-size:12.5px}
+  .src-bar-row .label{width:170px;color:var(--muted);flex-shrink:0}
+  .src-bar-row .track{flex:1;height:8px;background:var(--bg2);border-radius:5px;overflow:hidden}
+  .src-bar-row .fill{height:100%;background:var(--grad)}
+  .src-bar-row .count{width:36px;text-align:right;font-weight:700}
 </style>
 </head>
 <body>
@@ -79,61 +112,132 @@
     <a class="btn" href="/">← Back to app</a>
   </div>
 
-  <div class="stats">
-    <div class="stat"><div class="k">Total Users</div><div class="v" id="s-users">–</div><div class="ic">👤</div></div>
-    <div class="stat"><div class="k">Disabled</div><div class="v" id="s-disabled">–</div><div class="ic">🚫</div></div>
-    <div class="stat"><div class="k">Auto-mode On</div><div class="v" id="s-auto">–</div><div class="ic">⚡</div></div>
-    <div class="stat"><div class="k">Videos Done</div><div class="v" id="s-videos">–</div><div class="ic">✅</div></div>
-    <div class="stat"><div class="k">Queue (pend/proc)</div><div class="v" id="s-queue">–</div><div class="ic">🕓</div></div>
+  <div class="tabbar">
+    <button class="tab-btn active" data-tab="overview">Overview</button>
+    <button class="tab-btn" data-tab="visitors">Visitors</button>
   </div>
 
-  <div class="panel">
-    <h3>Engine control</h3>
-    <p class="hint">The render engine is shared by every user - one video renders at a time, system-wide.</p>
-    <div class="row">
-      <span class="dot" id="engine-dot"></span>
-      <span id="engine-label" style="font-weight:700">Loading…</span>
-      <span class="muted" id="engine-detail"></span>
-      <span style="flex:1"></span>
-      <button class="btn" id="engine-toggle">Pause engine</button>
-      <button class="btn" id="autokill-toggle">Disable all auto-mode</button>
+  <div class="tab-view active" id="tab-overview">
+    <div class="stats">
+      <div class="stat"><div class="k">Total Users</div><div class="v" id="s-users">–</div><div class="ic">👤</div></div>
+      <div class="stat"><div class="k">Disabled</div><div class="v" id="s-disabled">–</div><div class="ic">🚫</div></div>
+      <div class="stat"><div class="k">Auto-mode On</div><div class="v" id="s-auto">–</div><div class="ic">⚡</div></div>
+      <div class="stat"><div class="k">Videos Done</div><div class="v" id="s-videos">–</div><div class="ic">✅</div></div>
+      <div class="stat"><div class="k">Queue (pend/proc)</div><div class="v" id="s-queue">–</div><div class="ic">🕓</div></div>
+    </div>
+
+    <div class="panel">
+      <h3>Videos rendered - last 14 days</h3>
+      <p class="hint">Completed jobs across every account, by day.</p>
+      <div class="chart-bars" id="chart-videos"></div>
+    </div>
+
+    <div class="panel">
+      <h3>Engine control</h3>
+      <p class="hint">The render engine is shared by every user - one video renders at a time, system-wide.</p>
+      <div class="row">
+        <span class="dot" id="engine-dot"></span>
+        <span id="engine-label" style="font-weight:700">Loading…</span>
+        <span class="muted" id="engine-detail"></span>
+        <span style="flex:1"></span>
+        <button class="btn" id="engine-toggle">Pause engine</button>
+        <button class="btn" id="autokill-toggle">Disable all auto-mode</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Users</h3>
+      <p class="hint">Disabling a user immediately revokes their access, even on an existing session.</p>
+      <div class="row" style="margin-bottom:14px">
+        <input class="search" id="user-search" placeholder="Search by email…" />
+      </div>
+      <table>
+        <thead><tr><th>Email</th><th>Provider</th><th>Signed up</th><th>Jobs</th><th>Auto-mode</th><th>Role</th><th>Status</th><th></th></tr></thead>
+        <tbody id="users-body"></tbody>
+      </table>
+      <div class="empty" id="users-empty" style="display:none">No users yet.</div>
+    </div>
+
+    <div class="panel">
+      <h3>Global job monitor</h3>
+      <p class="hint">Every render job across every account, newest first.</p>
+      <div class="row" style="margin-bottom:14px">
+        <input class="search" id="job-search" placeholder="Search by title or email…" />
+        <select class="filter" id="job-filter">
+          <option value="">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="processing">Processing</option>
+          <option value="done">Done</option>
+          <option value="failed">Failed</option>
+        </select>
+        <select class="filter" id="job-pagesize">
+          <option value="25">25 / page</option>
+          <option value="50" selected>50 / page</option>
+          <option value="100">100 / page</option>
+        </select>
+      </div>
+      <table>
+        <thead><tr><th>Title</th><th>Owner</th><th>Status</th><th>Progress</th><th>Created</th></tr></thead>
+        <tbody id="jobs-body"></tbody>
+      </table>
+      <div class="empty" id="jobs-empty" style="display:none">No jobs yet.</div>
+      <div class="pager" id="jobs-pager" style="display:none">
+        <span class="muted" id="jobs-pager-label"></span>
+        <button class="btn sm" id="jobs-prev">← Prev</button>
+        <button class="btn sm" id="jobs-next">Next →</button>
+      </div>
     </div>
   </div>
 
-  <div class="panel">
-    <h3>Users</h3>
-    <p class="hint">Disabling a user immediately revokes their access, even on an existing session.</p>
-    <div class="row" style="margin-bottom:14px">
-      <input class="search" id="user-search" placeholder="Search by email…" />
+  <div class="tab-view" id="tab-visitors">
+    <div class="stats">
+      <div class="stat"><div class="k">Sessions</div><div class="v" id="vi-sessions">–</div><div class="ic">🌐</div></div>
+      <div class="stat"><div class="k">Pageviews</div><div class="v" id="vi-pageviews">–</div><div class="ic">👁️</div></div>
+      <div class="stat"><div class="k">Top source</div><div class="v" id="vi-top-source" style="font-size:16px">–</div><div class="ic">📈</div></div>
+      <div class="stat"><div class="k">Top country</div><div class="v" id="vi-top-country" style="font-size:16px">–</div><div class="ic">📍</div></div>
     </div>
-    <table>
-      <thead><tr><th>Email</th><th>Provider</th><th>Signed up</th><th>Jobs</th><th>Auto-mode</th><th>Status</th><th></th></tr></thead>
-      <tbody id="users-body"></tbody>
-    </table>
-    <div class="empty" id="users-empty" style="display:none">No users yet.</div>
-  </div>
 
-  <div class="panel">
-    <h3>Global job monitor</h3>
-    <p class="hint">Every render job across every account, newest first.</p>
-    <div class="row" style="margin-bottom:14px">
-      <input class="search" id="job-search" placeholder="Search by title or email…" />
-      <select class="filter" id="job-filter">
-        <option value="">All statuses</option>
-        <option value="pending">Pending</option>
-        <option value="processing">Processing</option>
-        <option value="done">Done</option>
-        <option value="failed">Failed</option>
-      </select>
+    <div class="panel">
+      <h3>Traffic by source</h3>
+      <p class="hint">How visitors are finding your marketing pages, last 2000 sessions.</p>
+      <div class="src-bars" id="vi-source-bars"></div>
     </div>
-    <table>
-      <thead><tr><th>Title</th><th>Owner</th><th>Status</th><th>Progress</th><th>Created</th></tr></thead>
-      <tbody id="jobs-body"></tbody>
-    </table>
-    <div class="empty" id="jobs-empty" style="display:none">No jobs yet.</div>
+
+    <div class="panel">
+      <h3>Sessions</h3>
+      <p class="hint">One row per anonymous visitor session - your own logged-in visits are excluded.</p>
+      <div class="row" style="margin-bottom:14px">
+        <input class="search" id="vi-search" placeholder="Search by page, referrer or country…" />
+        <select class="filter" id="vi-source-filter">
+          <option value="">All sources</option>
+          <option>Direct</option>
+          <option>Organic search</option>
+          <option>Organic social</option>
+          <option>Google Ads</option>
+          <option>Facebook/Instagram Ads</option>
+          <option>Referral</option>
+        </select>
+        <span style="flex:1"></span>
+        <a class="btn" id="vi-export" href="/api/v1/admin/visitors/export.csv">⬇ Export CSV</a>
+      </div>
+      <table>
+        <thead><tr><th>First seen</th><th>Landing page</th><th>Source</th><th>Location</th><th>Device</th><th>Pageviews</th></tr></thead>
+        <tbody id="vi-sessions-body"></tbody>
+      </table>
+      <div class="empty" id="vi-sessions-empty" style="display:none">No visitor sessions recorded yet.</div>
+    </div>
   </div>
 </div>
 <div id="toast"></div>
+<div class="modal-backdrop" id="video-modal" style="display:none">
+  <div class="modal">
+    <button class="btn sm close" id="video-modal-close">Close</button>
+    <h3 id="video-modal-title">Videos</h3>
+    <p class="hint" id="video-modal-sub"></p>
+    <div class="video-grid" id="video-modal-grid"></div>
+    <div class="empty" id="video-modal-empty" style="display:none">No finished videos yet.</div>
+  </div>
+</div>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -167,7 +271,8 @@ async function loadEngine(){
   $("#engine-dot").className="dot"+(d.paused?" paused":"");
   $("#engine-label").textContent=d.paused?"Paused":"Running";
   const detail=[];
-  if(d.current_job_id) detail.push("processing job "+d.current_job_id.slice(0,8)+"… for "+(d.current_uid||"").slice(0,8));
+  const busy=d.processing_count||0, workers=d.workers||1;
+  detail.push(busy+"/"+workers+" worker(s) rendering");
   if(d.auto_killed) detail.push("auto-mode globally disabled");
   $("#engine-detail").textContent=detail.join(" · ");
   $("#engine-toggle").textContent=d.paused?"Resume engine":"Pause engine";
@@ -179,16 +284,22 @@ function renderUsers(){
   const q=($("#user-search").value||"").toLowerCase();
   const filtered=allUsers.filter(u=>!q||(u.email||"").toLowerCase().includes(q));
   $("#users-empty").style.display=filtered.length?"none":"block";
-  $("#users-body").innerHTML=filtered.map(u=>`
+  $("#users-body").innerHTML=filtered.map(u=>{
+    const roleCls=u.is_owner?"role-owner":(u.is_admin?"role-admin":"role-user");
+    const roleLabel=u.is_owner?"Owner":(u.is_admin?"Admin":"User");
+    const roleBtn=u.is_owner?"":`<button class="btn sm" onclick="toggleAdmin('${u.uid}',${!u.is_admin})">${u.is_admin?"Revoke admin":"Make admin"}</button>`;
+    return `
     <tr>
-      <td>${esc(u.email)}</td>
+      <td><a href="#" onclick="openVideos('${u.uid}','${esc(u.email)}');return false">${esc(u.email)}</a></td>
       <td class="muted">${esc(u.provider||"")}</td>
       <td class="muted">${fmtDate(u.created_at)}</td>
       <td>${u.job_count||0}</td>
       <td><span class="pill ${u.profile&&u.profile.auto_mode?"on":"off"}">${u.profile&&u.profile.auto_mode?"ON":"off"}</span></td>
+      <td><span class="pill ${roleCls}">${roleLabel}</span></td>
       <td><span class="pill ${u.is_disabled?"failed":"done"}">${u.is_disabled?"Disabled":"Active"}</span></td>
-      <td><button class="btn sm ${u.is_disabled?"":"danger"}" onclick="toggleUser('${u.uid}',${!u.is_disabled})">${u.is_disabled?"Enable":"Disable"}</button></td>
-    </tr>`).join("");
+      <td class="row" style="gap:6px;flex-wrap:nowrap">${roleBtn}<button class="btn sm ${u.is_disabled?"":"danger"}" onclick="toggleUser('${u.uid}',${!u.is_disabled})">${u.is_disabled?"Enable":"Disable"}</button></td>
+    </tr>`;
+  }).join("");
 }
 
 window.toggleUser=async(uid,disable)=>{
@@ -199,6 +310,33 @@ window.toggleUser=async(uid,disable)=>{
     await loadUsers();
   }catch(e){toast(e.message,"err")}
 };
+
+window.toggleAdmin=async(uid,grant)=>{
+  if(!grant && !confirm("Revoke admin access for this user?")) return;
+  if(grant && !confirm("Grant this user full admin access, including every account's data and settings?")) return;
+  try{
+    await api(`/users/${uid}/${grant?"promote":"demote"}`,{method:"POST"});
+    toast(grant?"Admin access granted":"Admin access revoked");
+    await loadUsers();
+  }catch(e){toast(e.message,"err")}
+};
+
+window.openVideos=(uid,email)=>{
+  const jobs=allJobs.filter(j=>j.uid===uid && (j.videos||[]).length);
+  $("#video-modal-title").textContent="Videos - "+email;
+  $("#video-modal-sub").textContent=jobs.length+" job(s) with finished output";
+  const cards=[];
+  jobs.forEach(j=>(j.videos||[]).forEach(url=>cards.push({url,title:j.title})));
+  $("#video-modal-grid").innerHTML=cards.map(c=>`
+    <div class="vcard">
+      <video src="${esc(c.url)}" controls preload="metadata"></video>
+      <div class="vcaption">${esc(c.title)}</div>
+    </div>`).join("");
+  $("#video-modal-empty").style.display=cards.length?"none":"block";
+  $("#video-modal").style.display="flex";
+};
+$("#video-modal-close").onclick=()=>{ $("#video-modal").style.display="none"; $("#video-modal-grid").innerHTML=""; };
+$("#video-modal").onclick=(e)=>{ if(e.target.id==="video-modal") $("#video-modal-close").onclick(); };
 
 async function loadUsers(){
   const d=await api("/users");
@@ -212,9 +350,11 @@ const JOB_META={
   done:{cls:"done",label:"Done"},
   failed:{cls:"failed",label:"Failed"},
 };
+let jobsPage=1;
 function renderJobs(){
   const q=($("#job-search").value||"").toLowerCase();
   const statusFilter=$("#job-filter").value;
+  const pageSize=parseInt($("#job-pagesize").value,10)||50;
   const emailByUid={};
   allUsers.forEach(u=>emailByUid[u.uid]=u.email);
   const filtered=allJobs.filter(j=>{
@@ -224,7 +364,11 @@ function renderJobs(){
     return (j.title||"").toLowerCase().includes(q) || email.includes(q);
   });
   $("#jobs-empty").style.display=filtered.length?"none":"block";
-  $("#jobs-body").innerHTML=filtered.slice(0,200).map(j=>{
+  const totalPages=Math.max(1,Math.ceil(filtered.length/pageSize));
+  jobsPage=Math.min(jobsPage,totalPages);
+  const start=(jobsPage-1)*pageSize;
+  const pageItems=filtered.slice(start,start+pageSize);
+  $("#jobs-body").innerHTML=pageItems.map(j=>{
     const m=JOB_META[j.status]||JOB_META.pending;
     const owner=emailByUid[j.uid]||j.uid||"";
     return `<tr>
@@ -235,17 +379,50 @@ function renderJobs(){
       <td class="muted">${fmtDate(j.created_at)}</td>
     </tr>`;
   }).join("");
+  $("#jobs-pager").style.display=filtered.length?"flex":"none";
+  $("#jobs-pager-label").textContent=filtered.length?
+    `${start+1}-${Math.min(start+pageSize,filtered.length)} of ${filtered.length} · page ${jobsPage}/${totalPages}`:"";
+  $("#jobs-prev").disabled=jobsPage<=1;
+  $("#jobs-next").disabled=jobsPage>=totalPages;
+}
+
+function renderChart(){
+  const days=[];
+  for(let i=13;i>=0;i--){
+    const d=new Date(); d.setDate(d.getDate()-i);
+    days.push(d.toISOString().slice(0,10));
+  }
+  const counts=Object.fromEntries(days.map(d=>[d,0]));
+  allJobs.forEach(j=>{
+    if(j.status!=="done") return;
+    const day=(j.updated_at||j.created_at||"").slice(0,10);
+    if(day in counts) counts[day]++;
+  });
+  const max=Math.max(1,...Object.values(counts));
+  $("#chart-videos").innerHTML=days.map(d=>{
+    const v=counts[d];
+    const h=Math.round((v/max)*100);
+    const label=new Date(d+"T00:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric"});
+    return `<div class="bar-wrap" title="${v} on ${label}">
+      <div class="bar" style="height:${Math.max(h,v?4:2)}%"></div>
+      <div class="bar-label">${label.split(" ")[1]||""}</div>
+    </div>`;
+  }).join("");
 }
 
 async function loadJobs(){
   const d=await api("/jobs");
   allJobs=(d.jobs||[]).sort((a,b)=>(b.created_at||"").localeCompare(a.created_at||""));
   renderJobs();
+  renderChart();
 }
 
 $("#user-search").oninput=renderUsers;
-$("#job-search").oninput=renderJobs;
-$("#job-filter").onchange=renderJobs;
+$("#job-search").oninput=()=>{jobsPage=1;renderJobs();};
+$("#job-filter").onchange=()=>{jobsPage=1;renderJobs();};
+$("#job-pagesize").onchange=()=>{jobsPage=1;renderJobs();};
+$("#jobs-prev").onclick=()=>{jobsPage--;renderJobs();};
+$("#jobs-next").onclick=()=>{jobsPage++;renderJobs();};
 
 $("#engine-toggle").onclick=async()=>{
   const paused=$("#engine-label").textContent==="Paused";
@@ -264,6 +441,75 @@ async function refreshAll(){
 }
 refreshAll();
 setInterval(refreshAll, 4000);
+
+/* Visitors tab */
+let allVisitorSessions=[], visitorsLoaded=false;
+
+function fmtLocation(s){
+  const parts=[s.city,s.country].filter(Boolean);
+  return parts.length?parts.join(", "):"–";
+}
+
+function renderSourceBars(bySource){
+  const entries=Object.entries(bySource||{}).sort((a,b)=>b[1]-a[1]);
+  const max=Math.max(1,...entries.map(e=>e[1]));
+  $("#vi-source-bars").innerHTML=entries.length?entries.map(([label,count])=>`
+    <div class="src-bar-row">
+      <span class="label">${esc(label)}</span>
+      <span class="track"><span class="fill" style="width:${Math.round(count/max*100)}%"></span></span>
+      <span class="count">${count}</span>
+    </div>`).join(""):'<p class="muted">No traffic recorded yet.</p>';
+}
+
+function renderVisitorSessions(){
+  const q=($("#vi-search").value||"").toLowerCase();
+  const src=$("#vi-source-filter").value;
+  const filtered=allVisitorSessions.filter(s=>{
+    if(src && s.source_type!==src) return false;
+    if(!q) return true;
+    const hay=[s.landing_path,s.referrer,s.country,s.city].filter(Boolean).join(" ").toLowerCase();
+    return hay.includes(q);
+  });
+  $("#vi-sessions-empty").style.display=filtered.length?"none":"block";
+  $("#vi-sessions-body").innerHTML=filtered.map(s=>`
+    <tr>
+      <td class="muted">${fmtDate(s.first_seen)}</td>
+      <td>${esc(s.landing_path||"–")}</td>
+      <td><span class="pill ${s.source_type==='Direct'?'off':'on'}">${esc(s.source_type||'Direct')}</span></td>
+      <td class="muted">${esc(fmtLocation(s))}</td>
+      <td class="muted">${esc(s.device_type||'Desktop')}</td>
+      <td>${s.pageview_count||0}</td>
+    </tr>`).join("");
+}
+
+async function loadVisitors(){
+  try{
+    const [summary, sessionsData]=await Promise.all([api("/visitors/summary"), api("/visitors/sessions")]);
+    $("#vi-sessions").textContent=summary.total_sessions||0;
+    $("#vi-pageviews").textContent=summary.total_pageviews||0;
+    const topSource=Object.entries(summary.by_source||{}).sort((a,b)=>b[1]-a[1])[0];
+    $("#vi-top-source").textContent=topSource?topSource[0]:"–";
+    const topCountry=(summary.top_countries||[])[0];
+    $("#vi-top-country").textContent=topCountry?topCountry.country:"–";
+    renderSourceBars(summary.by_source);
+    allVisitorSessions=sessionsData.sessions||[];
+    renderVisitorSessions();
+    visitorsLoaded=true;
+  }catch(e){ toast(e.message,"err"); }
+}
+
+$("#vi-search").oninput=renderVisitorSessions;
+$("#vi-source-filter").onchange=renderVisitorSessions;
+
+document.querySelectorAll(".tab-btn").forEach(btn=>{
+  btn.onclick=()=>{
+    document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"));
+    document.querySelectorAll(".tab-view").forEach(v=>v.classList.remove("active"));
+    btn.classList.add("active");
+    $("#tab-"+btn.dataset.tab).classList.add("active");
+    if(btn.dataset.tab==="visitors" && !visitorsLoaded) loadVisitors();
+  };
+});
 </script>
 </body>
 </html>

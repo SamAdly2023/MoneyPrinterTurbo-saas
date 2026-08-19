@@ -8,7 +8,7 @@ from loguru import logger
 from app.config import config
 from app.models import const
 from app.models.schema import VideoConcatMode, VideoParams
-from app.services import llm, material, subtitle, twelvelabs, video, voice, upload_post
+from app.services import ai_visuals, avatar, llm, material, subtitle, twelvelabs, video, voice, upload_post
 from app.services import state as sm
 from app.utils import file_security, utils
 
@@ -47,6 +47,7 @@ def generate_terms(task_id, params, video_script):
             video_script=video_script,
             amount=8 if params.match_materials_to_script else 5,
             match_script_order=params.match_materials_to_script,
+            business_context=params.business_context,
         )
     else:
         if isinstance(video_terms, str):
@@ -233,19 +234,45 @@ def generate_subtitle(task_id, params, video_script, sub_maker, audio_file):
     return subtitle_path
 
 
-def get_video_materials(task_id, params, video_terms, audio_duration):
+def get_video_materials(task_id, params, video_terms, audio_duration, audio_path=""):
+    if params.video_source == "avatar":
+        logger.info("\n\n## generating AI talking-avatar video")
+        try:
+            return avatar.generate_avatar_video(
+                task_id=task_id, audio_path=audio_path, avatar_photo_path=params.avatar_photo_path
+            )
+        except Exception as e:  # noqa: BLE001 - surface a clear reason instead of a bare failure
+            error_msg = f"AI avatar generation failed: {e}"
+            sm.state.update_task(task_id, state=const.TASK_STATE_FAILED, error=error_msg)
+            logger.error(error_msg)
+            return None
     if params.video_source == "local":
         logger.info("\n\n## preprocess local materials")
         materials = video.preprocess_video(
             materials=params.video_materials, clip_duration=params.video_clip_duration
         )
         if not materials:
-            sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
-            logger.error(
-                "no valid materials found, please check the materials and try again."
-            )
+            error_msg = "no valid materials found, please check the materials and try again."
+            sm.state.update_task(task_id, state=const.TASK_STATE_FAILED, error=error_msg)
+            logger.error(error_msg)
             return None
         return [material_info.url for material_info in materials]
+    elif params.video_source == "ai":
+        logger.info("\n\n## generating AI visuals")
+        clips_needed = max(6, int(audio_duration / max(params.video_clip_duration, 1)) + 2)
+        materials = ai_visuals.generate_ai_materials(
+            task_id=task_id,
+            search_terms=video_terms,
+            video_aspect=params.video_aspect,
+            max_clip_duration=params.video_clip_duration,
+            count_needed=clips_needed,
+        )
+        if not materials:
+            error_msg = "AI visual generation failed - the free image API may be rate-limited or unreachable, try again shortly."
+            sm.state.update_task(task_id, state=const.TASK_STATE_FAILED, error=error_msg)
+            logger.error(error_msg)
+            return None
+        return materials
     else:
         logger.info(f"\n\n## downloading videos from {params.video_source}")
         # 顺序匹配模式只在用户显式开启时生效。这里强制素材下载按关键词顺序
@@ -265,10 +292,9 @@ def get_video_materials(task_id, params, video_terms, audio_duration):
             match_script_order=params.match_materials_to_script,
         )
         if not downloaded_videos:
-            sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
-            logger.error(
-                "failed to download videos, maybe the network is not available. if you are in China, please use a VPN."
-            )
+            error_msg = "failed to download stock footage - no matching clips found or the network is unavailable."
+            sm.state.update_task(task_id, state=const.TASK_STATE_FAILED, error=error_msg)
+            logger.error(error_msg)
             return None
         return downloaded_videos
 
@@ -295,16 +321,27 @@ def generate_final_videos(
             utils.task_dir(task_id), f"combined-{index}.mp4"
         )
         logger.info(f"\n\n## combining video: {index} => {combined_video_path}")
-        video.combine_videos(
-            combined_video_path=combined_video_path,
-            video_paths=downloaded_videos,
-            audio_file=audio_file,
-            video_aspect=params.video_aspect,
-            video_concat_mode=video_concat_mode,
-            video_transition_mode=video_transition_mode,
-            max_clip_duration=params.video_clip_duration,
-            threads=params.n_threads,
-        )
+        if params.video_source == "avatar":
+            # downloaded_videos is a single, already full-length talking-head
+            # clip lip-synced to audio_file - combine_videos() would chop and
+            # reshuffle it into segments meant for B-roll, destroying that
+            # sync. Just fit it to the target aspect ratio directly.
+            video.fit_single_clip_to_aspect(
+                source_path=downloaded_videos[0],
+                output_path=combined_video_path,
+                video_aspect=params.video_aspect,
+            )
+        else:
+            video.combine_videos(
+                combined_video_path=combined_video_path,
+                video_paths=downloaded_videos,
+                audio_file=audio_file,
+                video_aspect=params.video_aspect,
+                video_concat_mode=video_concat_mode,
+                video_transition_mode=video_transition_mode,
+                max_clip_duration=params.video_clip_duration,
+                threads=params.n_threads,
+            )
 
         _progress += 50 / params.video_count / 2
         sm.state.update_task(task_id, progress=_progress)
@@ -349,7 +386,7 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
 
     # 2. Generate terms
     video_terms = ""
-    if params.video_source != "local":
+    if params.video_source not in ("local", "avatar"):
         video_terms = generate_terms(task_id, params, video_script)
         if not video_terms:
             sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
@@ -402,7 +439,7 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
 
     # 5. Get video materials
     downloaded_videos = get_video_materials(
-        task_id, params, video_terms, audio_duration
+        task_id, params, video_terms, audio_duration, audio_path=audio_file
     )
     if not downloaded_videos:
         sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)

@@ -107,6 +107,26 @@ class VideoParams(BaseModel):
     stroke_color: Optional[str] = "#000000"
     stroke_width: float = 1.5
     n_threads: Optional[int] = 2
+
+    # Resolved server-side (see saas.py _build_params/build_default_params) from
+    # this business's Profile logo + the use-logo toggle on the job/profile -
+    # not something the form sends directly. Empty string = no overlay.
+    logo_path: Optional[str] = ""
+
+    # Short "a business called X (bio)" descriptor (saas.py _business_niche_label)
+    # - steers task.py's fallback keyword generation toward the business's own
+    # trade when the New Script form left Keywords blank. Empty = unbranded.
+    business_context: Optional[str] = ""
+
+    # Contact card burned into the last few seconds of the video (see saas.py
+    # contact_card_fields) - "" means that line is omitted entirely.
+    contact_website: Optional[str] = ""
+    contact_phone: Optional[str] = ""
+
+    # Resolved server-side (see saas.py resolve_avatar_photo_path) from this
+    # user's own Profile photo, falling back to the admin's platform-wide
+    # default - only used when video_source == "avatar".
+    avatar_photo_path: Optional[str] = ""
     paragraph_number: int = Field(default=1, ge=1, le=10)
     video_script_prompt: str = Field(default="", max_length=2000)
     custom_system_prompt: str = Field(default="", max_length=8000)

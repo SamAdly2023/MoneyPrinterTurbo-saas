@@ -4,7 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Sign in - Vidzy</title>
-<link rel="icon" type="image/svg+xml" href="/logo.svg" />
+<meta name="robots" content="noindex, follow" />
+<link rel="icon" type="image/png" href="/logo-icon.png" />
 <style>
   :root{
     --bg:#0b0f19; --panel:#141b2d; --border:#232d45; --text:#e7ecf5; --muted:#8b98b5;
@@ -21,7 +22,7 @@
     width:360px;background:var(--panel);border:1px solid var(--border);border-radius:16px;
     padding:32px 28px;box-shadow:0 10px 30px rgba(0,0,0,.35);
   }
-  .logo{width:44px;height:44px;border-radius:12px;background:var(--grad);display:grid;place-items:center;
+  .logo{width:44px;height:44px;border-radius:12px;background:#fff;object-fit:cover;
     font-size:22px;margin-bottom:16px;}
   h1{font-size:18px;margin:0 0 4px}
   p.sub{margin:0 0 22px;color:var(--muted);font-size:13px}
@@ -52,7 +53,7 @@
 </head>
 <body>
   <div class="card">
-    <img class="logo" src="/logo.svg" alt="Vidzy" />
+    <img class="logo" src="/logo-icon.png" alt="Vidzy" />
     <h1>Vidzy</h1>
     <p class="sub" id="mode-sub">Sign in to continue</p>
 
@@ -87,7 +88,14 @@ firebase.initializeApp({
 });
 
 const $ = s => document.querySelector(s);
-let signUpMode = false;
+let signUpMode = new URLSearchParams(location.search).get("signup") === "1";
+if (signUpMode) {
+  $("#mode-sub").textContent = "Create your account";
+  $("#submit-btn").textContent = "Sign up";
+  $("#password").autocomplete = "new-password";
+  $("#switch-text").textContent = "Already have an account?";
+  $("#switch-link").textContent = "Sign in";
+}
 
 function showError(msg){
   const e = $("#error");
@@ -154,6 +162,28 @@ $("#switch-link").onclick = () => {
 // Deliberately no auto-login-on-load: /logout should always land you back
 // on a form that requires an explicit action, even if the Firebase client
 // SDK still has a cached session in this browser.
+</script>
+<script>
+(function(){
+  try{
+    var KEY="vi_sid";
+    var sid=localStorage.getItem(KEY);
+    if(!sid){ sid=Date.now().toString(36)+Math.random().toString(36).slice(2,10); localStorage.setItem(KEY,sid); }
+    var qs=new URLSearchParams(location.search);
+    var payload=JSON.stringify({
+      session_id: sid, path: location.pathname, title: document.title,
+      referrer: document.referrer || "",
+      utm_source: qs.get("utm_source")||"", utm_medium: qs.get("utm_medium")||"",
+      utm_campaign: qs.get("utm_campaign")||"", utm_term: qs.get("utm_term")||"",
+      utm_content: qs.get("utm_content")||"",
+    });
+    if(navigator.sendBeacon){
+      navigator.sendBeacon("/api/v1/track/pageview", new Blob([payload],{type:"application/json"}));
+    }else{
+      fetch("/api/v1/track/pageview",{method:"POST",headers:{"Content-Type":"application/json"},body:payload,keepalive:true}).catch(function(){});
+    }
+  }catch(e){}
+})();
 </script>
 </body>
 </html>

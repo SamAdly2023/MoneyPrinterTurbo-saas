@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Terms of Service - Vidzy</title>
+<link rel="icon" type="image/png" href="/logo-icon.png" />
+<style>
+  :root{
+    --bg:#0b0f19; --panel:#141b2d; --border:#232d45; --text:#e7ecf5; --muted:#8b98b5;
+    --accent:#6c5ce7; --grad:linear-gradient(135deg,#6c5ce7,#a06bff);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%}
+  body{
+    background:radial-gradient(1200px 600px at 80% -10%,rgba(108,92,231,.18),transparent 60%),var(--bg);
+    color:var(--text); font-family:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.65;
+  }
+  a{color:#a06bff}
+  .wrap{max-width:760px;margin:0 auto;padding:56px 24px 90px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:17px;text-decoration:none;color:var(--text);margin-bottom:36px}
+  .brand img{width:30px;height:30px;border-radius:8px}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:-.01em}
+  .updated{color:var(--muted);font-size:13px;margin:0 0 40px}
+  h2{font-size:19px;margin:36px 0 10px;color:#fff}
+  p,li{color:#c3cbe0;font-size:14.5px}
+  ul{padding-left:22px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="brand" href="/"><img src="/logo-icon.png" alt="" />Vidzy</a>
+  <h1>Terms of Service</h1>
+  <p class="updated">Last updated: August 2026</p>
+
+  <p>These Terms of Service ("Terms") govern your use of Vidzy (the "Service"). By creating an account or using the Service, you agree to these Terms.</p>
+
+  <h2>The Service</h2>
+  <p>Vidzy lets you generate short-form videos using AI, and optionally publish them to connected platforms such as YouTube and TikTok. Features and availability may change over time.</p>
+
+  <h2>Your account</h2>
+  <ul>
+    <li>You must provide accurate information and keep your login credentials secure.</li>
+    <li>You are responsible for all activity that happens under your account.</li>
+    <li>We may suspend or disable accounts that violate these Terms or applicable law.</li>
+  </ul>
+
+  <h2>Acceptable use</h2>
+  <p>You agree not to use Vidzy to create or publish content that is illegal, infringing, deceptive, or that violates the terms of service of any platform you connect (including YouTube's and TikTok's own policies). You are solely responsible for the content you generate and publish through the Service.</p>
+
+  <h2>Your content</h2>
+  <p>You retain ownership of the scripts and videos you create. By connecting a publishing platform (e.g. YouTube) and requesting or enabling publishing, you authorize Vidzy to upload that content to your connected account on your behalf, using the credentials you provided during connection.</p>
+
+  <h2>Third-party services</h2>
+  <p>Vidzy relies on third-party services (including Google Firebase, YouTube API Services, TikTok's Content Posting API, AI language model providers, and stock-media providers) to operate. Your use of those integrations is also subject to their respective terms, including the <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">YouTube Terms of Service</a> when you connect a YouTube account.</p>
+
+  <h2>Disclaimer of warranties</h2>
+  <p>The Service is provided "as is" without warranties of any kind. AI-generated content may contain inaccuracies - review generated scripts and videos before publishing them publicly.</p>
+
+  <h2>Limitation of liability</h2>
+  <p>To the maximum extent permitted by law, Vidzy is not liable for indirect, incidental, or consequential damages arising from your use of the Service, including any consequences of publishing content to a third-party platform.</p>
+
+  <h2>Termination</h2>
+  <p>You may stop using the Service and request account deletion at any time. We may suspend or terminate accounts that violate these Terms.</p>
+
+  <h2>Changes to these Terms</h2>
+  <p>We may update these Terms from time to time. Continued use of the Service after changes means you accept the updated Terms.</p>
+
+  <h2>Contact us</h2>
+  <p>Questions about these Terms? Contact us at the support email listed on our Google Cloud OAuth consent screen for this app.</p>
+</div>
+<script>
+(function(){
+  try{
+    var KEY="vi_sid";
+    var sid=localStorage.getItem(KEY);
+    if(!sid){ sid=Date.now().toString(36)+Math.random().toString(36).slice(2,10); localStorage.setItem(KEY,sid); }
+    var qs=new URLSearchParams(location.search);
+    var payload=JSON.stringify({
+      session_id: sid, path: location.pathname, title: document.title,
+      referrer: document.referrer || "",
+      utm_source: qs.get("utm_source")||"", utm_medium: qs.get("utm_medium")||"",
+      utm_campaign: qs.get("utm_campaign")||"", utm_term: qs.get("utm_term")||"",
+      utm_content: qs.get("utm_content")||"",
+    });
+    if(navigator.sendBeacon){
+      navigator.sendBeacon("/api/v1/track/pageview", new Blob([payload],{type:"application/json"}));
+    }else{
+      fetch("/api/v1/track/pageview",{method:"POST",headers:{"Content-Type":"application/json"},body:payload,keepalive:true}).catch(function(){});
+    }
+  }catch(e){}
+})();
+</script>
+</body>
+</html>

@@ -8,16 +8,26 @@ Firebase-backed session endpoints.
     POST /auth/logout     clear the session cookie
 """
 
+import threading
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel
 
 from app.controllers.v1.base import new_router
-from app.services import auth, firestore_db
+from app.services import auth, email, firestore_db
 from app.utils import utils
 
 router = new_router()
+
+
+def _send_signup_emails(user_email: str, provider: str):
+    try:
+        email.send_welcome_email(user_email)
+        email.notify_admin_new_signup(user_email, provider)
+    except Exception as e:  # noqa: BLE001 - never let email issues surface to the user
+        logger.warning(f"signup email dispatch failed for {user_email}: {e}")
 
 
 class SessionBody(BaseModel):
@@ -32,12 +42,17 @@ def create_session(body: SessionBody):
         logger.warning(f"ID token verification failed: {e}")
         return utils.get_response(401, message="invalid or expired sign-in token")
 
-    uid, email, provider = decoded["uid"], decoded["email"], decoded["provider"]
-    user = firestore_db.create_user_if_missing(uid, email, provider)
+    uid, user_email, provider = decoded["uid"], decoded["email"], decoded["provider"]
+    user, is_new = firestore_db.create_user_if_missing(uid, user_email, provider)
     if user.get("is_disabled"):
         return utils.get_response(403, message="this account has been disabled")
 
-    response = JSONResponse(content=utils.get_response(200, {"uid": uid, "email": email}))
+    if is_new:
+        threading.Thread(
+            target=_send_signup_emails, args=(user_email, provider), daemon=True
+        ).start()
+
+    response = JSONResponse(content=utils.get_response(200, {"uid": uid, "email": user_email}))
     response.set_cookie(
         key=auth.COOKIE_NAME,
         value=auth.create_auth_cookie_value(uid),

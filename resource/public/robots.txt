@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /login
+Disallow: /admin
+Disallow: /tasks
+Disallow: /api/
+
+Sitemap: https://vidzy.web.app/sitemap.xml

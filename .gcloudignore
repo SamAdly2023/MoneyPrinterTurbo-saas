@@ -1,6 +1,7 @@
 .gcloudignore
 .git
 .gitignore
+.github/
 .venv/
 venv/
 storage/
@@ -10,3 +11,11 @@ __pycache__/
 .vscode/
 test/
 docs/
+config.toml
+.firebase/
+/models/
+node_modules/
+/visitor-insights/
+*.log
+.env
+.env.*

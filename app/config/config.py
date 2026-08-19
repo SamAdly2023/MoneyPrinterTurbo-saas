@@ -1,9 +1,81 @@
 import os
 import shutil
 import socket
+import threading
 
 import toml
 from loguru import logger
+
+
+class ScopedConfigDict:
+    """Dict-like wrapper around a shared settings dict that also supports a
+    temporary, per-THREAD overlay on top of it.
+
+    `.get()` / `[]` / `in` check the calling thread's own overlay first,
+    falling back to the shared base dict - this is what makes per-job config
+    scoping (saas.py's _user_config_scope) safe when more than one render
+    worker thread is active at once: each thread's overlaid settings are
+    invisible to every other thread, so one user's job can never pick up
+    another user's voice/branding/subtitle settings mid-render.
+
+    Every OTHER mutation (`__setitem__`, `pop`, ...) writes straight through
+    to the shared base dict, preserving the exact behavior every existing
+    `config.app["x"] = y` call site already relies on (e.g. the one-time
+    session_secret bootstrap in auth.py) - only _user_config_scope uses the
+    overlay-specific set_overlay()/clear_overlay() methods below.
+    """
+
+    def __init__(self, base: dict):
+        self._base = base
+        self._local = threading.local()
+
+    def _overlay(self) -> dict:
+        return getattr(self._local, "data", None) or {}
+
+    def set_overlay(self, data: dict) -> None:
+        self._local.data = dict(data)
+
+    def clear_overlay(self) -> None:
+        self._local.data = {}
+
+    def get(self, key, default=None):
+        overlay = self._overlay()
+        if key in overlay:
+            return overlay[key]
+        return self._base.get(key, default)
+
+    def __getitem__(self, key):
+        overlay = self._overlay()
+        if key in overlay:
+            return overlay[key]
+        return self._base[key]
+
+    def __setitem__(self, key, value):
+        self._base[key] = value
+
+    def __contains__(self, key):
+        return key in self._overlay() or key in self._base
+
+    def __iter__(self):
+        return iter(self._base)
+
+    def __len__(self):
+        return len(self._base)
+
+    def pop(self, key, default=None):
+        return self._base.pop(key, default)
+
+    def keys(self):
+        return self._base.keys()
+
+    def items(self):
+        return self._base.items()
+
+    def values(self):
+        return self._base.values()
+
+    def __repr__(self):
+        return f"ScopedConfigDict({self._base!r})"
 
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 # Override with MPT_CONFIG_FILE to point at a persistent disk (e.g. on Render)
@@ -150,29 +222,32 @@ def load_config():
 
 def save_config():
     with open(config_file, "w", encoding="utf-8") as f:
-        _cfg["app"] = app
+        # app/ui are ScopedConfigDict wrappers, not plain dicts - persist the
+        # underlying shared base dict (never the per-thread overlay, which is
+        # deliberately never written back to disk).
+        _cfg["app"] = app._base
         _cfg["azure"] = azure
         _cfg["siliconflow"] = siliconflow
         _cfg["elevenlabs"] = elevenlabs
         _cfg["chatterbox"] = chatterbox
-        _cfg["ui"] = ui
+        _cfg["ui"] = ui._base
         f.write(toml.dumps(_cfg))
 
 
 _cfg = load_config()
-app = _cfg.get("app", {})
+app = ScopedConfigDict(_cfg.get("app", {}))
 whisper = _cfg.get("whisper", {})
 proxy = _cfg.get("proxy", {})
 azure = _cfg.get("azure", {})
 siliconflow = _cfg.get("siliconflow", {})
 elevenlabs = _cfg.get("elevenlabs", {})
 chatterbox = _cfg.get("chatterbox", {})
-ui = _cfg.get(
+ui = ScopedConfigDict(_cfg.get(
     "ui",
     {
         "hide_log": False,
     },
-)
+))
 
 hostname = socket.gethostname()
 

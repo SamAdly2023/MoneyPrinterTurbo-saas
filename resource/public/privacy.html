@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Privacy Policy - Vidzy</title>
+<link rel="icon" type="image/png" href="/logo-icon.png" />
+<style>
+  :root{
+    --bg:#0b0f19; --panel:#141b2d; --border:#232d45; --text:#e7ecf5; --muted:#8b98b5;
+    --accent:#6c5ce7; --grad:linear-gradient(135deg,#6c5ce7,#a06bff);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%}
+  body{
+    background:radial-gradient(1200px 600px at 80% -10%,rgba(108,92,231,.18),transparent 60%),var(--bg);
+    color:var(--text); font-family:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.65;
+  }
+  a{color:#a06bff}
+  .wrap{max-width:760px;margin:0 auto;padding:56px 24px 90px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:17px;text-decoration:none;color:var(--text);margin-bottom:36px}
+  .brand img{width:30px;height:30px;border-radius:8px}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:-.01em}
+  .updated{color:var(--muted);font-size:13px;margin:0 0 40px}
+  h2{font-size:19px;margin:36px 0 10px;color:#fff}
+  p,li{color:#c3cbe0;font-size:14.5px}
+  ul{padding-left:22px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px 20px;margin:20px 0;font-size:14px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="brand" href="/"><img src="/logo-icon.png" alt="" />Vidzy</a>
+  <h1>Privacy Policy</h1>
+  <p class="updated">Last updated: August 2026</p>
+
+  <p>This Privacy Policy explains what information Vidzy ("we," "us") collects when you use our AI video generation and publishing service (the "Service"), and how we use, share, and protect it.</p>
+
+  <h2>Information we collect</h2>
+  <ul>
+    <li><strong>Account information</strong>: your email address and sign-in method, via Firebase Authentication (Google sign-in or email/password).</li>
+    <li><strong>Business profile</strong>: any business name, website, address, email, or description you choose to enter, used to personalize generated scripts and video descriptions.</li>
+    <li><strong>Content you create</strong>: video subjects, scripts, and the finished videos and thumbnails generated for your account.</li>
+    <li><strong>Connected accounts</strong>: if you connect YouTube or TikTok, we store the OAuth access/refresh tokens needed to publish videos on your behalf, and basic channel identifiers (e.g. channel name).</li>
+    <li><strong>Usage data</strong>: standard server logs (timestamps, request paths, error data) used for operating and debugging the Service.</li>
+  </ul>
+
+  <h2>How we use your information</h2>
+  <ul>
+    <li>To generate, render, and store the videos you request.</li>
+    <li>To publish videos to YouTube and/or TikTok when you explicitly connect an account and request or enable auto-publishing.</li>
+    <li>To operate, maintain, and improve the Service, including troubleshooting and abuse prevention.</li>
+    <li>To communicate with you about your account when necessary.</li>
+  </ul>
+
+  <div class="card">
+    <strong>YouTube API Services disclosure.</strong> Vidzy uses YouTube API Services to let you connect your YouTube channel and publish videos. By connecting your channel, you also agree to the
+    <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener">YouTube Terms of Service</a>. Google's use of information received from Vidzy's use of the YouTube API Services is governed by the
+    <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google Privacy Policy</a>. You can revoke Vidzy's access to your YouTube account at any time from the
+    <a href="https://security.google.com/settings/security/permissions" target="_blank" rel="noopener">Google security settings page</a>, or by disconnecting YouTube from within Vidzy.
+  </div>
+
+  <h2>How we share information</h2>
+  <p>We do not sell your personal information. We share data only with the service providers necessary to operate Vidzy, including:</p>
+  <ul>
+    <li><strong>Firebase / Google Cloud</strong> - authentication, database, and hosting.</li>
+    <li><strong>YouTube Data API and TikTok Content Posting API</strong> - only when you connect an account, to publish videos you request.</li>
+    <li><strong>AI and stock-media providers</strong> (e.g. your configured LLM provider, Pexels/Pixabay) - to generate scripts and source stock footage for your videos.</li>
+  </ul>
+
+  <h2>Data retention</h2>
+  <p>We retain your account data and generated videos for as long as your account is active. You may delete individual jobs/videos from your dashboard, or request full account deletion by contacting us - we will delete your stored data and disconnect any connected platform tokens.</p>
+
+  <h2>Security</h2>
+  <p>We use industry-standard practices (encrypted connections, access-controlled cloud storage, signed session cookies) to protect your data. No online service can guarantee absolute security.</p>
+
+  <h2>Children's privacy</h2>
+  <p>Vidzy is not directed to children under 13, and we do not knowingly collect personal information from children under 13.</p>
+
+  <h2>Changes to this policy</h2>
+  <p>We may update this policy from time to time. Continued use of the Service after changes means you accept the updated policy.</p>
+
+  <h2>Contact us</h2>
+  <p>Questions about this policy? Contact us at the support email listed on our Google Cloud OAuth consent screen for this app.</p>
+</div>
+<script>
+(function(){
+  try{
+    var KEY="vi_sid";
+    var sid=localStorage.getItem(KEY);
+    if(!sid){ sid=Date.now().toString(36)+Math.random().toString(36).slice(2,10); localStorage.setItem(KEY,sid); }
+    var qs=new URLSearchParams(location.search);
+    var payload=JSON.stringify({
+      session_id: sid, path: location.pathname, title: document.title,
+      referrer: document.referrer || "",
+      utm_source: qs.get("utm_source")||"", utm_medium: qs.get("utm_medium")||"",
+      utm_campaign: qs.get("utm_campaign")||"", utm_term: qs.get("utm_term")||"",
+      utm_content: qs.get("utm_content")||"",
+    });
+    if(navigator.sendBeacon){
+      navigator.sendBeacon("/api/v1/track/pageview", new Blob([payload],{type:"application/json"}));
+    }else{
+      fetch("/api/v1/track/pageview",{method:"POST",headers:{"Content-Type":"application/json"},body:payload,keepalive:true}).catch(function(){});
+    }
+  }catch(e){}
+})();
+</script>
+</body>
+</html>

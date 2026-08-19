@@ -15,7 +15,14 @@ from app.router import root_api_router
 from app.services import auth
 from app.utils import utils
 
-_PUBLIC_PATHS = {"/login", "/logout", "/api/v1/auth/session", "/logo.svg"}
+_PUBLIC_PATHS = {
+    "/", "/login", "/logout", "/api/v1/auth/session", "/logo.svg", "/logo.png", "/logo-icon.png",
+    "/privacy", "/terms", "/robots.txt", "/sitemap.xml",
+    # Anonymous visitor pageview beacon fired from the public marketing pages.
+    "/api/v1/track/pageview",
+    # TikTok domain-ownership verification file (Developer Portal -> URL properties)
+    "/tiktokxb2Qi9CpEIW2FcFuDD6btN9J9HKbErcD.txt",
+}
 
 
 def _read_public_html(name: str) -> str:
@@ -86,7 +93,16 @@ async def auth_gate(request: Request, call_next):
         response.headers["Cache-Control"] = "no-store, private"
         return response
 
-    if path in _PUBLIC_PATHS:
+    # /media/* (finished video files) must be fetchable without a session
+    # cookie - Instagram's publish API fetches the video server-to-server by
+    # URL, with no way to send our auth cookie. Filenames are unguessable
+    # per-job UUIDs, the same trust model already relied on once a video is
+    # actually published to YouTube/TikTok.
+    # /api/v1/external/* authenticates itself via a per-user API key (see
+    # controllers/v1/external.py) instead of the session cookie - a
+    # different trust boundary entirely, meant to be called by other
+    # platforms that have no way to hold a browser session.
+    if path in _PUBLIC_PATHS or path.startswith("/media/") or path.startswith("/api/v1/external/"):
         return _no_store(await call_next(request))
 
     user = auth.get_current_user(request)
@@ -105,9 +121,27 @@ async def auth_gate(request: Request, call_next):
     return _no_store(await call_next(request))
 
 
+@app.get("/", response_class=HTMLResponse)
+async def root_page(request: Request):
+    # Signed-in visitors land on their dashboard; everyone else sees the
+    # public marketing landing page instead of being bounced to /login.
+    user = auth.get_current_user(request)
+    return _read_public_html("index.html" if user else "landing.html")
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page():
     return _read_public_html("login.html")
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_page():
+    return _read_public_html("privacy.html")
+
+
+@app.get("/terms", response_class=HTMLResponse)
+async def terms_page():
+    return _read_public_html("terms.html")
 
 
 @app.get("/admin", response_class=HTMLResponse)

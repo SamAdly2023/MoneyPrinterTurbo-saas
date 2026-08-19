@@ -397,6 +397,55 @@ def _open_image_clip_with_fallback(image_path: str):
         return ImageClip(sanitized_path), sanitized_path
 
 
+def _build_logo_overlay_clip(logo_path: str, duration: float, video_width: int, video_height: int):
+    """A small top-right logo watermark, sized relative to the frame so it
+    reads the same across portrait/landscape/square exports."""
+    logo_clip, _ = _open_image_clip_with_fallback(logo_path)
+    target_w = max(1, int(video_width * 0.14))
+    if logo_clip.w and logo_clip.w != target_w:
+        logo_clip = logo_clip.resized(width=target_w)
+    margin = max(8, int(video_width * 0.02))
+    x = max(0, video_width - logo_clip.w - margin)
+    return logo_clip.with_duration(duration).with_position((x, margin))
+
+
+def _build_contact_card_clip(
+    website: str, phone: str, video_duration: float, video_width: int, video_height: int, font_path: str
+):
+    """A 'www.site.com / phone' pill, shown only in the last few seconds so
+    it reads as a closing CTA rather than competing with the narration
+    subtitles. Returns None if neither line is set."""
+    lines = [line for line in (website, phone) if line]
+    if not lines:
+        return None
+
+    font_size = max(28, int(video_width * 0.045))
+    text_clip = TextClip(
+        text="\n".join(lines),
+        font=font_path,
+        font_size=font_size,
+        color="#FFFFFF",
+        stroke_color="#000000",
+        stroke_width=max(1, int(font_size * 0.08)),
+        text_align="center",
+        size=(int(video_width * 0.85), None),
+        interline=int(font_size * 0.3),
+    )
+    pad_x, pad_y = int(font_size * 0.7), int(font_size * 0.5)
+    bg_w = min(video_width - 20, text_clip.w + 2 * pad_x)
+    bg_h = text_clip.h + 2 * pad_y
+    bg_clip = _rounded_subtitle_background_clip(
+        width=bg_w, height=bg_h, color="#000000", alpha=160, radius=max(10, int(font_size * 0.5))
+    )
+    card = CompositeVideoClip(
+        [bg_clip, text_clip.with_position(("center", "center"))], size=(bg_w, bg_h)
+    )
+    card_duration = min(4.0, video_duration)
+    x = int((video_width - bg_w) / 2)
+    y = int(video_height * 0.62)
+    return card.with_start(max(0.0, video_duration - card_duration)).with_duration(card_duration).with_position((x, y))
+
+
 def _open_video_clip_quietly(video_path: str, audio: bool = False) -> VideoFileClip:
     """
     安静地打开视频文件，避免 MoviePy 2.1.x 把 ffmpeg 探测信息直接打印到 stdout。
@@ -743,6 +792,42 @@ def combine_videos(
     return combined_video_path
 
 
+def fit_single_clip_to_aspect(source_path: str, output_path: str, video_aspect: VideoAspect) -> str:
+    """Resize/letterbox one already-full-length clip to the target aspect
+    ratio and write it directly as the 'combined' video.
+
+    Unlike combine_videos(), this never chops the source into segments and
+    reassembles/shuffles them - fine for B-roll, but it would scramble a
+    continuous talking-head performance (see avatar.py) out of order while
+    the separately-attached narration audio keeps playing in the original
+    order, visibly breaking lip-sync.
+    """
+    aspect = VideoAspect(video_aspect)
+    video_width, video_height = aspect.to_resolution()
+    clip = _open_video_clip_quietly(source_path)
+    try:
+        clip_w, clip_h = clip.size
+        if clip_w == video_width and clip_h == video_height:
+            fitted = clip
+        else:
+            clip_ratio = clip_w / clip_h
+            video_ratio = video_width / video_height
+            if clip_ratio == video_ratio:
+                fitted = clip.resized(new_size=(video_width, video_height))
+            else:
+                scale_factor = video_width / clip_w if clip_ratio > video_ratio else video_height / clip_h
+                new_w, new_h = int(clip_w * scale_factor), int(clip_h * scale_factor)
+                background = ColorClip(size=(video_width, video_height), color=(0, 0, 0)).with_duration(clip.duration)
+                resized = clip.resized(new_size=(new_w, new_h)).with_position("center")
+                fitted = CompositeVideoClip([background, resized])
+        _write_videofile_with_codec_fallback(
+            fitted, output_path, codec=_get_configured_video_codec(), logger=None, fps=fps,
+        )
+    finally:
+        close_clip(clip)
+    return output_path
+
+
 def wrap_text(text, max_width, font="Arial", fontsize=60):
     # 字幕换行必须在真正创建 TextClip 前完成，否则 MoviePy 只会按原始文本
     # 计算渲染区域。这里用 PIL 按当前字体和字号测量宽度，确保每一行都尽量
@@ -915,7 +1000,7 @@ def generate_video(
     output_dir = os.path.dirname(output_file)
 
     font_path = ""
-    if params.subtitle_enabled:
+    if params.subtitle_enabled or params.contact_website or params.contact_phone:
         if not params.font_name:
             params.font_name = "STHeitiMedium.ttc"
         font_path = os.path.join(utils.font_dir(), params.font_name)
@@ -1100,6 +1185,26 @@ def generate_video(
             clip = create_text_clip(subtitle_item=item)
             text_clips.append(clip)
         video_clip = CompositeVideoClip([video_clip, *text_clips])
+
+    if params.logo_path and os.path.isfile(params.logo_path):
+        try:
+            logo_clip = _build_logo_overlay_clip(
+                params.logo_path, video_clip.duration, video_width, video_height
+            )
+            video_clip = CompositeVideoClip([video_clip, logo_clip])
+        except Exception as e:
+            logger.warning(f"failed to overlay logo watermark: {str(e)}")
+
+    if params.contact_website or params.contact_phone:
+        try:
+            contact_clip = _build_contact_card_clip(
+                params.contact_website, params.contact_phone,
+                video_clip.duration, video_width, video_height, font_path,
+            )
+            if contact_clip is not None:
+                video_clip = CompositeVideoClip([video_clip, contact_clip])
+        except Exception as e:
+            logger.warning(f"failed to overlay contact card: {str(e)}")
 
     bgm_file = get_bgm_file(bgm_type=params.bgm_type, bgm_file=params.bgm_file)
     if bgm_file:

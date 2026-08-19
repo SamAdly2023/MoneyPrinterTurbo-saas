@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Vidzy</title>
-<link rel="icon" type="image/svg+xml" href="/logo.svg" />
+<link rel="icon" type="image/png" href="/logo-icon.png" />
 <style>
   :root{
     --bg:#0b0f19; --bg2:#0f1524; --panel:#141b2d; --panel2:#1a2338;
@@ -20,28 +20,28 @@
     background:radial-gradient(1200px 600px at 80% -10%,rgba(108,92,231,.18),transparent 60%),var(--bg);
     color:var(--text);
     font-family:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
-    font-size:14px; line-height:1.5;
+    font-size:13px; line-height:1.5;
   }
   a{color:var(--accent2);text-decoration:none}
   .app{display:flex;min-height:100vh;max-width:100vw}
 
   /* Sidebar */
   .sidebar{
-    width:190px;flex-shrink:0;background:linear-gradient(180deg,var(--bg2),var(--bg));
-    border-right:1px solid var(--border);padding:16px 12px;display:flex;flex-direction:column;gap:4px;
-    position:sticky;top:0;height:100vh;font-size:13px;
+    width:160px;flex-shrink:0;background:linear-gradient(180deg,var(--bg2),var(--bg));
+    border-right:1px solid var(--border);padding:14px 10px;display:flex;flex-direction:column;gap:4px;
+    position:sticky;top:0;height:100vh;font-size:12px;
   }
-  .brand{display:flex;align-items:center;gap:10px;padding:4px 6px 16px}
-  .brand .logo{width:32px;height:32px;border-radius:10px;background:var(--grad);display:grid;place-items:center;font-size:17px;box-shadow:var(--shadow)}
-  .brand h1{font-size:14px;margin:0;font-weight:700;letter-spacing:.2px}
-  .brand span{font-size:10px;color:var(--muted)}
+  .brand{display:flex;align-items:center;gap:8px;padding:4px 6px 14px}
+  .brand .logo{width:28px;height:28px;border-radius:9px;background:#fff;object-fit:cover;font-size:15px;box-shadow:var(--shadow)}
+  .brand h1{font-size:13px;margin:0;font-weight:700;letter-spacing:.2px}
+  .brand span{font-size:9px;color:var(--muted)}
   .nav-item{
-    display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;color:var(--muted);
-    cursor:pointer;font-weight:600;transition:.15s;border:1px solid transparent;font-size:13px;
+    display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:9px;color:var(--muted);
+    cursor:pointer;font-weight:600;transition:.15s;border:1px solid transparent;font-size:12px;
   }
   .nav-item:hover{background:var(--panel);color:var(--text)}
   .nav-item.active{background:var(--panel2);color:#fff;border-color:var(--border)}
-  .nav-item .ic{width:18px;text-align:center;font-size:13px}
+  .nav-item .ic{width:16px;text-align:center;font-size:12px}
   .engine-box{margin-top:auto;background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:11px}
   .engine-box .row{display:flex;align-items:center;justify-content:space-between;gap:8px}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(34,197,94,.15)}
@@ -69,6 +69,9 @@
   .btn.danger:hover{background:#3a1c28}
   .btn:disabled{opacity:.5;cursor:not-allowed}
   .btn.sm{padding:7px 12px;font-size:13px}
+  /* Auto Mode hidden platform-wide for now (not yet a good fit for social
+     algorithms/upload limits) - remove this rule to bring it back. */
+  #auto-btn,#auto-banner{display:none !important}
   #auto-btn:not(.auto-on){border-color:#6b5620;color:#f5c56b;background:rgba(245,158,11,.08)}
   #auto-btn:not(.auto-on):hover{background:rgba(245,158,11,.16)}
   .btn.auto-on{background:linear-gradient(135deg,#f59e0b,#f97316);border:none;color:#1a1200;box-shadow:0 0 0 0 rgba(245,158,11,.6);animation:pulse 1.8s infinite}
@@ -76,6 +79,7 @@
   .auto-tag{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.5px;background:linear-gradient(135deg,#f59e0b,#f97316);color:#1a1200;padding:2px 7px;border-radius:6px;margin-left:8px;vertical-align:middle}
   #yt-btn.connected{border-color:#5a1e1e;color:#ff8a8a;background:rgba(239,68,68,.10)}
   #tt-btn.connected{border-color:#155e63;color:#5fe3ee;background:rgba(34,211,238,.10)}
+  #fb-btn.connected{border-color:#1d3a63;color:#7db1ff;background:rgba(59,130,246,.10)}
   .pub-result{margin-top:10px;font-size:12.5px;display:flex;flex-direction:column;gap:5px}
   .pub-result .ok{color:#5ee08a} .pub-result .no{color:#ff9d9d}
 
@@ -89,7 +93,7 @@
   .stat.done .v{color:var(--green)} .stat.failed .v{color:var(--red)}
 
   /* Job cards */
-  .jobs{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+  .jobs{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
   .job{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:10px;transition:.15s;display:flex;flex-direction:column;min-width:0}
   .job:hover{border-color:#33406180}
   .job .top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
@@ -108,6 +112,15 @@
   .job .actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
   .job .actions .btn{padding:6px 10px;font-size:12px}
   .job video{width:100%;border-radius:10px;margin-top:10px;background:#000;border:1px solid var(--border);aspect-ratio:9/16;object-fit:cover}
+  .video-thumb{width:100%;border-radius:10px;margin-top:10px;background:#000;border:1px solid var(--border);aspect-ratio:9/16;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;color:var(--muted)}
+  .video-thumb:hover{border-color:var(--accent)}
+  .video-thumb .play-ic{width:44px;height:44px;border-radius:50%;background:rgba(108,92,231,.85);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:18px}
+  .video-modal-backdrop{position:fixed;inset:0;background:rgba(6,8,14,.75);display:flex;align-items:center;justify-content:center;z-index:60;padding:24px}
+  .video-modal{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);max-width:380px;width:100%;padding:16px;box-shadow:var(--shadow)}
+  .video-modal video{width:100%;border-radius:10px;background:#000;aspect-ratio:9/16;object-fit:contain}
+  .video-modal .close{display:block;margin:0 0 10px auto}
   .err{margin-top:10px;background:#2a1620;border:1px solid #4a2530;color:#ffb4b4;padding:8px 10px;border-radius:9px;font-size:11.5px;word-break:break-word}
   .empty{text-align:center;padding:70px 20px;color:var(--muted);grid-column:1/-1}
   .empty .big{font-size:46px;margin-bottom:10px}
@@ -125,7 +138,6 @@
   .tags{display:flex;flex-wrap:wrap;gap:6px}
   .tag{background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:12px;color:#9fb0d6}
 
-  @media(max-width:1600px){.jobs{grid-template-columns:repeat(5,1fr)}}
   @media(max-width:1300px){.jobs{grid-template-columns:repeat(4,1fr)}}
   @media(max-width:1000px){.jobs{grid-template-columns:repeat(3,1fr)}}
   @media(max-width:760px){.jobs{grid-template-columns:repeat(2,1fr)}}
@@ -166,14 +178,17 @@
 <div class="app">
   <aside class="sidebar">
     <div class="brand">
-      <img class="logo" src="/logo.svg" alt="Vidzy" />
+      <img class="logo" src="/logo-icon.png" alt="Vidzy" />
       <div><h1>Vidzy</h1><span>AI video studio</span></div>
     </div>
     <div class="nav-item active" data-view="dashboard"><span class="ic">▦</span> Dashboard</div>
     <div class="nav-item" data-view="new"><span class="ic">✎</span> New Script</div>
+    <div class="nav-item" data-view="clips"><span class="ic">✂️</span> Clips</div>
     <div class="nav-item" data-view="profile"><span class="ic">🏢</span> Profile</div>
+    <div class="nav-item" data-view="api"><span class="ic">🔌</span> API</div>
     <div class="nav-item" id="settings-link" data-view="settings" style="display:none"><span class="ic">⚙</span> Settings</div>
     <a class="nav-item" id="admin-link" href="/admin" style="display:none"><span class="ic">🛡</span> Admin</a>
+    <a class="nav-item" href="https://wa.me/639610065666" target="_blank" rel="noopener"><span class="ic">💬</span> Contact Support</a>
 
     <div class="engine-box">
       <div class="row">
@@ -197,9 +212,28 @@
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn" id="yt-btn" title="Connect your YouTube channel">▶ YouTube</button>
           <button class="btn" id="tt-btn" title="Connect your TikTok account">◆ TikTok</button>
+          <button class="btn" id="fb-btn" title="Connect your Facebook Page (and linked Instagram)">📘 Facebook</button>
           <button class="btn" id="auto-btn" title="Let AI invent viral Shorts and keep rendering them non-stop">⚡ Auto Mode</button>
+          <select id="gen-one-aspect" title="Aspect ratio for this video" style="width:auto;padding:9px 11px">
+            <option value="9:16">Portrait 9:16</option>
+            <option value="16:9">Landscape 16:9</option>
+            <option value="1:1">Square 1:1</option>
+          </select>
+          <select id="gen-one-style" title="Visual style for this video" style="width:auto;padding:9px 11px">
+            <option value="pexels">Stock Footage</option>
+            <option value="ai">AI Visuals</option>
+            <option value="avatar">AI Presenter</option>
+            <option value="local">My Media</option>
+          </select>
+          <button class="btn" id="gen-one-btn" title="Let AI invent and queue a single video right now, without turning on Auto Mode">🎬 Generate 1 video</button>
           <button class="btn primary" data-view="new">＋ New Script</button>
         </div>
+      </div>
+      <div id="gen-one-materials-wrap" style="display:none;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:20px">
+        <p class="hint" style="margin:0 0 10px">Upload the photos/videos to use for this video (at least 480×480) - AI still writes the script and narration, your media becomes the visuals.</p>
+        <input type="file" id="gen-one-materials-file" accept=".png,.jpg,.jpeg,.webp,.mp4,.mov,.mkv,.webm,.m4v" multiple style="max-width:320px" />
+        <button class="btn sm" id="gen-one-materials-upload" type="button" style="margin-left:8px">Upload</button>
+        <div id="gen-one-materials-list" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px"></div>
       </div>
       <div id="auto-banner" style="display:none;background:rgba(245,158,11,.1);border:1px solid #4a3a1a;color:#f5c56b;padding:11px 16px;border-radius:12px;margin-bottom:20px;font-weight:600">
         ⚡ Auto Mode is ON — AI is generating viral video ideas and rendering them continuously. Click the button again to stop.
@@ -240,6 +274,19 @@
             <select id="f-aspect"><option value="9:16">Portrait 9:16</option><option value="16:9">Landscape 16:9</option><option value="1:1">Square 1:1</option></select></div>
           <div class="field"><label>Clip duration (s)</label><input id="f-clip" type="number" value="5" min="2" max="15" /></div>
         </div>
+        <div class="field"><label>Video style</label>
+          <select id="f-style">
+            <option value="pexels">Stock Footage</option>
+            <option value="ai">AI Visuals</option>
+            <option value="avatar">AI Presenter</option>
+            <option value="local">My Media</option>
+          </select></div>
+        <div class="field" id="f-materials-wrap" style="display:none">
+          <label>Your photos/videos <span class="desc">at least 480×480 - images become a short slow-zoom clip, videos are used as-is</span></label>
+          <input type="file" id="f-materials-file" accept=".png,.jpg,.jpeg,.webp,.mp4,.mov,.mkv,.webm,.m4v" multiple style="max-width:320px" />
+          <button class="btn sm" id="f-materials-upload" type="button" style="margin-top:8px">Upload</button>
+          <div id="f-materials-list" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px"></div>
+        </div>
         <div class="grid2">
           <div class="field"><label>Voice</label>
             <select id="f-voice">
@@ -251,10 +298,63 @@
             </select></div>
           <div class="field"><label>Number of videos</label><input id="f-count" type="number" value="1" min="1" max="5" /></div>
         </div>
+        <div class="grid2">
+          <div class="field"><label>Clip transitions <span class="desc">between stock-footage cuts</span></label>
+            <select id="f-transition">
+              <option value="">None</option>
+              <option value="Shuffle">Shuffle</option>
+              <option value="FadeIn">Fade in</option>
+              <option value="FadeOut">Fade out</option>
+              <option value="SlideIn">Slide in</option>
+              <option value="SlideOut">Slide out</option>
+            </select></div>
+          <div class="field"><label>Clip order</label>
+            <select id="f-concat"><option value="random">Random</option><option value="sequential">Sequential</option></select></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label>Voice speed</label>
+            <select id="f-voice-rate">
+              <option value="0.8">Slower (0.8x)</option>
+              <option value="1.0" selected>Normal (1x)</option>
+              <option value="1.2">Faster (1.2x)</option>
+              <option value="1.5">Fastest (1.5x)</option>
+            </select></div>
+          <div class="field"><label>Background music</label>
+            <select id="f-bgm"><option value="random">Random</option><option value="">None</option></select></div>
+        </div>
         <div class="field switch"><input type="checkbox" id="f-subs" checked /><label style="margin:0">Burn in subtitles</label></div>
+        <div class="field switch" id="f-use-logo-wrap" style="display:none"><input type="checkbox" id="f-use-logo" /><label style="margin:0">Show my business logo on this video (top-right corner)</label></div>
         <div class="form-actions">
           <button class="btn primary" id="save-job">Save &amp; add to queue</button>
           <button class="btn ghost" data-view="dashboard">Cancel</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- CLIPS -->
+    <section class="view" id="view-clips">
+      <div class="page-head"><div><h2>Clips</h2><p>Upload a long-form video and let AI cut it into short, captioned highlight clips.</p></div></div>
+      <div class="card" id="clip-upload-card">
+        <div class="field">
+          <label>Long-form video <span class="desc">mp4, mov, mkv, webm - up to 2GB</span></label>
+          <input type="file" id="clip-file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,.mp4,.mov,.mkv,.webm,.m4v" />
+        </div>
+        <div class="grid2">
+          <div class="field"><label>Number of clips</label><input id="clip-count" type="number" value="3" min="1" max="10" /></div>
+          <div class="field" style="display:flex;align-items:flex-end">
+            <button class="btn primary" id="clip-upload-btn" style="width:100%">Upload &amp; analyze</button>
+          </div>
+        </div>
+        <p class="hint" id="clip-status"></p>
+      </div>
+
+      <div class="card" id="clip-review-card" style="display:none">
+        <div class="section-title">Highlight segments</div>
+        <p class="hint" id="clip-review-hint"></p>
+        <div id="clip-segments"></div>
+        <div class="form-actions">
+          <button class="btn primary" id="clip-queue-btn">Queue selected clips</button>
+          <button class="btn ghost" id="clip-cancel-btn">Start over</button>
         </div>
       </div>
     </section>
@@ -269,9 +369,36 @@
           <div class="field"><label>Website</label><input id="p-website" placeholder="https://..." /></div>
           <div class="field"><label>Email</label><input id="p-email" placeholder="contact@yourbusiness.com" /></div>
         </div>
-        <div class="field"><label>Address</label><input id="p-address" placeholder="City, State" /></div>
+        <div class="grid2">
+          <div class="field"><label>Phone <span class="desc">shown on your videos' closing contact card, if set</span></label><input id="p-phone" placeholder="(555) 123-4567" /></div>
+          <div class="field"><label>Address</label><input id="p-address" placeholder="City, State" /></div>
+        </div>
         <div class="field"><label>About your business <span class="desc">used to steer Auto Mode topics + call-to-actions</span></label>
           <textarea id="p-bio" placeholder="What does your business do? Who are your customers?"></textarea></div>
+
+        <div class="section-title">Logo watermark</div>
+        <div class="field">
+          <label>Business logo <span class="desc">small PNG/JPG with a transparent background works best</span></label>
+          <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+            <img id="p-logo-preview" style="display:none;width:64px;height:64px;object-fit:contain;background:#fff;border-radius:8px;border:1px solid var(--border)" />
+            <input type="file" id="p-logo-file" accept=".png,.jpg,.jpeg,.webp" style="max-width:260px" />
+            <button class="btn" id="p-logo-upload">Upload logo</button>
+            <button class="btn" id="p-logo-remove" style="display:none">Remove</button>
+          </div>
+        </div>
+        <div class="field switch"><input type="checkbox" id="p-use-logo" /><label style="margin:0">Show this logo on generated videos by default <span class="desc">(top-right corner) - can still be toggled per script</span></label></div>
+
+        <div class="section-title">AI presenter photo</div>
+        <p class="hint">Used when a video's style is set to "AI Presenter" - animates this photo to speak the narration. A clear, front-facing face photo works best.</p>
+        <div class="field">
+          <label>Presenter photo</label>
+          <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+            <img id="p-avatar-preview" style="display:none;width:64px;height:64px;object-fit:cover;background:#fff;border-radius:8px;border:1px solid var(--border)" />
+            <input type="file" id="p-avatar-file" accept=".png,.jpg,.jpeg,.webp" style="max-width:260px" />
+            <button class="btn" id="p-avatar-upload">Upload photo</button>
+            <button class="btn" id="p-avatar-remove" style="display:none">Remove</button>
+          </div>
+        </div>
 
         <div class="section-title">Publishing — auto-share</div>
         <div class="field switch"><input type="checkbox" id="p-autopub" /><label style="margin:0">Auto-publish each finished video</label></div>
@@ -284,7 +411,69 @@
         <div class="field"><label>YouTube upload privacy</label>
           <select id="p-yt-privacy"><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></div>
 
+        <div class="section-title">Video preferences <span class="desc">just for your account - overrides the platform default for your Auto Mode videos</span></div>
+        <div class="grid2">
+          <div class="field"><label>Aspect ratio</label>
+            <select id="p-aspect"><option value="">Platform default</option><option value="9:16">Portrait 9:16</option><option value="16:9">Landscape 16:9</option><option value="1:1">Square 1:1</option></select></div>
+          <div class="field"><label>Subtitle position</label>
+            <select id="p-subpos"><option value="">Platform default</option><option value="bottom">Bottom</option><option value="center">Center</option><option value="top">Top</option></select></div>
+        </div>
+        <div class="field"><label>Subtitles</label>
+          <select id="p-subtitle-pref"><option value="default">Platform default</option><option value="on">Always on</option><option value="off">Always off</option></select></div>
+
         <div class="form-actions"><button class="btn primary" id="save-profile">Save profile</button></div>
+      </div>
+    </section>
+
+    <!-- API -->
+    <section class="view" id="view-api">
+      <div class="page-head"><div><h2>API Access</h2><p>Trigger video generation from another platform - a script, Zapier, Make, your own app.</p></div></div>
+
+      <div class="card">
+        <div class="section-title">Your API key</div>
+        <p class="hint" id="api-key-status">Loading…</p>
+        <div class="row" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+          <button class="btn primary" id="api-key-generate">Generate new key</button>
+          <button class="btn danger" id="api-key-revoke" style="display:none">Revoke key</button>
+        </div>
+        <div id="api-key-reveal" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:11px;padding:14px;margin-top:8px">
+          <p class="hint" style="color:#f5c56b;margin:0 0 8px">⚠ Copy this now - you won't be able to see it again. Generating a new key immediately disables this one.</p>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="api-key-value" readonly style="font-family:monospace;font-size:13px" />
+            <button class="btn sm" id="api-key-copy">Copy</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">How it works</div>
+        <p class="hint">Send your key as a bearer token, then create a video job the same way the dashboard does.</p>
+        <div class="field"><label>Base URL</label><input readonly value="" id="api-base-url" /></div>
+
+        <div class="section-title">Create a video</div>
+        <p class="hint"><code>POST /api/v1/external/v1/videos</code></p>
+        <textarea readonly id="api-example-create" style="min-height:170px;font-family:monospace;font-size:12.5px"></textarea>
+
+        <div class="section-title">Check status / get the finished video URL</div>
+        <p class="hint"><code>GET /api/v1/external/v1/videos/{id}</code></p>
+        <textarea readonly id="api-example-status" style="min-height:90px;font-family:monospace;font-size:12.5px"></textarea>
+
+        <div class="section-title">List your recent videos</div>
+        <p class="hint"><code>GET /api/v1/external/v1/videos</code></p>
+        <textarea readonly id="api-example-list" style="min-height:70px;font-family:monospace;font-size:12.5px"></textarea>
+
+        <div class="section-title">Parameters</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead><tr style="text-align:left;color:var(--faint)"><th style="padding:6px 0">Field</th><th>Required</th><th>Notes</th></tr></thead>
+          <tbody style="color:var(--muted)">
+            <tr><td style="padding:6px 0"><code>subject</code></td><td>yes</td><td>topic to script and generate a video about</td></tr>
+            <tr><td style="padding:6px 0"><code>script</code></td><td>no</td><td>your own narration - if omitted, AI writes one from <code>subject</code></td></tr>
+            <tr><td style="padding:6px 0"><code>keywords</code></td><td>no</td><td>comma-separated visual search terms; AI picks them if omitted</td></tr>
+            <tr><td style="padding:6px 0"><code>title</code></td><td>no</td><td>shown in your dashboard queue</td></tr>
+            <tr><td style="padding:6px 0"><code>aspect_ratio</code></td><td>no</td><td><code>9:16</code> (default), <code>16:9</code>, or <code>1:1</code></td></tr>
+            <tr><td style="padding:6px 0"><code>style</code></td><td>no</td><td><code>stock</code>, <code>ai_visuals</code>, or <code>ai_presenter</code> - defaults to your platform's default</td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
 
@@ -299,8 +488,14 @@
           <div class="field"><label>Pixabay API key <span class="desc">optional fallback</span></label><input id="s-pixabay" placeholder="Pixabay key" /></div>
         </div>
         <div class="field"><label>Primary video source <span class="desc">tried first; the other key above is the fallback</span></label>
-          <select id="s-source"><option value="pexels">Pexels</option><option value="pixabay">Pixabay</option><option value="local">Local files</option></select></div>
+          <select id="s-source"><option value="pexels">Pexels (stock footage)</option><option value="pixabay">Pixabay (stock footage)</option><option value="ai">AI-generated visuals (free, experimental)</option><option value="avatar">AI talking avatar (Replicate, paid)</option><option value="local">Local files</option></select></div>
+        <div class="field" id="s-ai-style-wrap" style="display:none"><label>AI visual style <span class="desc">added to every image prompt - leave blank for a cinematic default</span></label>
+          <input id="s-ai-style" placeholder="cinematic photo, dramatic lighting, high detail, 4k" /></div>
         <div class="field"><label>Additional token <span class="desc">stored for your reference</span></label><input id="s-extra" placeholder="" /></div>
+
+        <div class="section-title" id="s-avatar-wrap" style="display:none">AI talking avatar</div>
+        <p class="hint" id="s-avatar-hint" style="display:none">Animates each business's presenter photo (uploaded from their own Profile page) to lip-sync the narration, via Replicate's hosted SadTalker model. Costs roughly $0.08 and 1-2 minutes per video - separate from and on top of your other API costs. This token is shared platform-wide; each user uploads their own photo.</p>
+        <div class="field" id="s-avatar-token-wrap" style="display:none"><label>Replicate API token</label><input id="s-replicate-token" placeholder="r8_…" /></div>
 
         <div class="section-title">AI model (script generation)</div>
         <div class="field"><label>LLM provider</label>
@@ -322,6 +517,11 @@
             <select id="s-subpos"><option value="bottom">Bottom</option><option value="center">Center</option><option value="top">Top</option></select></div>
         </div>
         <div class="field switch"><input type="checkbox" id="s-subs" checked /><label style="margin:0">Subtitles enabled by default</label></div>
+        <p class="hint">Applies to every client's Auto Mode videos (they have no per-job override) - manual "New Script" jobs always show their own checkbox instead. Turning this off removes captions from all Auto Mode output platform-wide.</p>
+
+        <div class="section-title">Auto Mode topic structure</div>
+        <div class="field"><label>Required topic prefix <span class="desc">e.g. "Benefits of", "How to" - every Auto Mode video title/subject will start with this</span></label>
+          <input id="s-topic-template" placeholder="Leave blank to let AI invent any topic freely" /></div>
 
         <div class="section-title">Publishing — YouTube (free, works locally)</div>
         <p class="hint">Create an OAuth <b>Web application</b> client in Google Cloud (enable “YouTube Data API v3”), add the redirect URI below, add yourself as a test user, then paste the ID/secret here. This is the shared OAuth app - each user still connects their own channel from the Dashboard.</p>
@@ -330,6 +530,8 @@
           <div class="field"><label>YouTube client ID</label><input id="s-yt-id" placeholder="...apps.googleusercontent.com" /></div>
           <div class="field"><label>YouTube client secret</label><input id="s-yt-secret" placeholder="GOCSPX-..." /></div>
         </div>
+        <div class="field"><label>Daily upload cap <span class="desc">optional self-imposed limit on YouTube uploads/day across all users - 0 means uncapped (only Google's own quota limits you, with a clear error if you hit it)</span></label>
+          <input id="s-yt-cap" type="number" min="0" placeholder="0 = uncapped" /></div>
 
         <div class="section-title">Publishing — TikTok (needs app audit for auto-post)</div>
         <p class="hint">From TikTok for Developers. Without an approved audit, videos are sent to your TikTok <b>drafts</b>. TikTok requires an <b>https</b> redirect URI, so set the base URL (e.g. an ngrok https URL) below.</p>
@@ -340,12 +542,34 @@
           <div class="field"><label>TikTok client secret</label><input id="s-tt-secret" placeholder="..." /></div>
         </div>
 
+        <div class="section-title">Email notifications</div>
+        <p class="hint">SMTP credentials used to send the welcome email to new users, and a new-signup alert to you. Works with Gmail (use an app password), SendGrid, Mailgun, or any SMTP provider.</p>
+        <div class="grid2">
+          <div class="field"><label>SMTP host</label><input id="s-smtp-host" placeholder="smtp.gmail.com" /></div>
+          <div class="field"><label>SMTP port</label><input id="s-smtp-port" type="number" placeholder="587" /></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label>SMTP username</label><input id="s-smtp-user" placeholder="you@gmail.com" /></div>
+          <div class="field"><label>SMTP password</label><input id="s-smtp-pass" type="password" placeholder="app password" /></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label>From email</label><input id="s-smtp-from-email" placeholder="hello@vidzy.app" /></div>
+          <div class="field"><label>From name</label><input id="s-smtp-from-name" placeholder="Vidzy" /></div>
+        </div>
+        <div class="field"><label>Admin notification email <span class="desc">gets a message every time someone new signs up</span></label><input id="s-admin-notify" placeholder="samadly728@gmail.com" /></div>
+
         <div class="form-actions"><button class="btn primary" id="save-settings">Save settings</button></div>
       </div>
     </section>
   </main>
 </div>
 <div id="toast"></div>
+<div class="video-modal-backdrop" id="video-modal" style="display:none">
+  <div class="video-modal">
+    <button class="btn sm close" id="video-modal-close">✕ Close</button>
+    <video id="video-modal-player" controls></video>
+  </div>
+</div>
 
 <script>
 const API = "/api/v1/saas";
@@ -371,6 +595,19 @@ function show(view){
   const nav=document.querySelector('.nav-item[data-view="'+view+'"]');if(nav)nav.classList.add("active");
   if(view==="settings")loadSettings();
   if(view==="profile")loadProfile();
+  if(view==="api")loadApiKey();
+  if(view==="new"){
+    if(currentProfile.video_aspect)$("#f-aspect").value=currentProfile.video_aspect;
+    if(currentProfile.subtitle_pref==="on")$("#f-subs").checked=true;
+    else if(currentProfile.subtitle_pref==="off")$("#f-subs").checked=false;
+    if(currentProfile.has_logo){
+      $("#f-use-logo-wrap").style.display="block";
+      $("#f-use-logo").checked=!!currentProfile.use_logo;
+    }else{
+      $("#f-use-logo-wrap").style.display="none";
+      $("#f-use-logo").checked=false;
+    }
+  }
 }
 document.addEventListener("click",e=>{const el=e.target.closest("[data-view]");if(el){show(el.dataset.view)}});
 
@@ -383,12 +620,21 @@ const STATUS_META={
 };
 function fmtDate(s){try{return new Date(s).toLocaleString()}catch(e){return s}}
 
-function renderJob(j){
+function renderJob(j,isRecent){
   const m=STATUS_META[j.status]||STATUS_META.pending;
   const p=j.params||{};
   let media="";
   if(j.status==="done"&&(j.videos||[]).length){
-    media=j.videos.map(u=>`<video src="${esc(u)}" controls preload="metadata"></video>`).join("");
+    // Rendering a real <video> per job (even with preload="metadata") means
+    // one network request + decode context each - fine for a handful, but
+    // with hundreds of finished jobs it noticeably bogs down the browser.
+    // Only the most recent jobs get an inline player; older ones get a
+    // lightweight placeholder that lazy-loads the real video in a modal
+    // on click.
+    media=j.videos.map(u=>isRecent
+      ? `<video src="${esc(u)}" controls preload="metadata"></video>`
+      : `<div class="video-thumb" onclick="openVideoModal('${esc(u)}')" title="Click to play"><span class="play-ic">▶</span></div>`
+    ).join("");
   }
   let kit="";
   if(j.status==="done"&&j.meta&&(j.meta.title||j.meta.description||(j.meta.tags||[]).length)){
@@ -437,23 +683,98 @@ function renderJob(j){
   </div>`;
 }
 
-let social={youtube:{connected:false},tiktok:{connected:false}};
+let social={youtube:{connected:false},tiktok:{connected:false},facebook:{connected:false}};
 let socialSig="";
 async function refreshSocial(){
   try{
     const d=await api("/social/status");
     social=d;
-    const yt=$("#yt-btn"),tt=$("#tt-btn");
+    const yt=$("#yt-btn"),tt=$("#tt-btn"),fb=$("#fb-btn");
     yt.className="btn"+(d.youtube.connected?" connected":"");
     yt.textContent=d.youtube.connected?("▶ YouTube ✓"+(d.youtube.channel?" "+d.youtube.channel:"")):"▶ YouTube";
     tt.className="btn"+(d.tiktok.connected?" connected":"");
     tt.textContent=d.tiktok.connected?"◆ TikTok ✓":"◆ TikTok";
-    const ns=JSON.stringify([d.youtube.connected,d.youtube.channel,d.tiktok.connected]);
+    fb.className="btn"+(d.facebook.connected?" connected":"");
+    fb.textContent=d.facebook.connected?("📘 Facebook ✓"+(d.facebook.instagram?" +IG":"")):"📘 Facebook";
+    const ns=JSON.stringify([d.youtube.connected,d.youtube.channel,d.tiktok.connected,d.facebook.connected,d.facebook.instagram]);
     if(ns!==socialSig){socialSig=ns;lastSig="";}   // refresh job cards so publish buttons update
   }catch(e){}
 }
 
 let lastSig="";
+/* Clips: upload a long-form video, AI picks highlights, queue them as jobs */
+let clipUploadId=null;
+function fmtClock(s){s=Math.max(0,Math.round(s));const m=Math.floor(s/60),ss=s%60;return m+":"+String(ss).padStart(2,"0");}
+
+$("#clip-upload-btn").onclick=async()=>{
+  const f=$("#clip-file").files[0];
+  if(!f){toast("Choose a video file first","err");return;}
+  const btn=$("#clip-upload-btn");
+  btn.disabled=true;btn.textContent="Uploading…";
+  $("#clip-status").textContent="Uploading "+f.name+"…";
+  try{
+    const fd=new FormData();fd.append("file",f);
+    const r=await fetch(API+"/clips/upload",{method:"POST",body:fd});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||(j.status&&j.status>=400))throw new Error(j.message||("HTTP "+r.status));
+    const d=j.data!==undefined?j.data:j;
+    clipUploadId=d.upload_id;
+    btn.textContent="Analyzing…";
+    $("#clip-status").textContent="Analyzing "+f.name+" ("+fmtClock(d.duration)+")… this can take a minute.";
+    const count=parseInt($("#clip-count").value,10)||3;
+    const a=await api("/clips/analyze",{method:"POST",body:JSON.stringify({upload_id:clipUploadId,clip_count:count})});
+    renderClipSegments(a.segments||[],a.ai_selected);
+    $("#clip-status").textContent="";
+    $("#clip-review-card").style.display="block";
+  }catch(e){
+    toast(e.message,"err");
+    $("#clip-status").textContent="";
+  }finally{
+    btn.disabled=false;btn.textContent="Upload & analyze";
+  }
+};
+
+function renderClipSegments(segments,aiSelected){
+  $("#clip-review-hint").textContent=aiSelected
+    ?"AI picked these moments from the transcript - edit the title or times, then queue the ones you want."
+    :"No transcript available, so these are evenly spaced - edit the title or times, then queue the ones you want.";
+  $("#clip-segments").innerHTML=segments.map((s,i)=>`
+    <div class="grid2" style="align-items:end;margin-bottom:10px" data-idx="${i}">
+      <div class="field" style="grid-column:1/-1"><label>Title</label><input class="clip-title" value="${esc(s.title||'')}" /></div>
+      <div class="field"><label>Start (s)</label><input class="clip-start" type="number" step="0.1" min="0" value="${s.start.toFixed(1)}" /></div>
+      <div class="field"><label>End (s)</label><input class="clip-end" type="number" step="0.1" min="0" value="${s.end.toFixed(1)}" /></div>
+    </div>`).join("")||`<p class="hint">No segments found.</p>`;
+}
+
+$("#clip-queue-btn").onclick=async()=>{
+  if(!clipUploadId){toast("Upload a video first","err");return;}
+  const rows=[...document.querySelectorAll("#clip-segments [data-idx]")];
+  const segments=rows.map(r=>({
+    title:r.querySelector(".clip-title").value.trim(),
+    start:parseFloat(r.querySelector(".clip-start").value),
+    end:parseFloat(r.querySelector(".clip-end").value),
+  })).filter(s=>!isNaN(s.start)&&!isNaN(s.end)&&s.end>s.start);
+  if(!segments.length){toast("No valid segments to queue","err");return;}
+  const btn=$("#clip-queue-btn");btn.disabled=true;btn.textContent="Queuing…";
+  try{
+    const d=await api("/clips/jobs",{method:"POST",body:JSON.stringify({upload_id:clipUploadId,segments})});
+    toast((d.jobs||[]).length+" clip(s) queued");
+    resetClipTab();
+    show("dashboard");
+    refresh();
+  }catch(e){toast(e.message,"err")}
+  finally{btn.disabled=false;btn.textContent="Queue selected clips";}
+};
+
+$("#clip-cancel-btn").onclick=resetClipTab;
+function resetClipTab(){
+  clipUploadId=null;
+  $("#clip-file").value="";
+  $("#clip-status").textContent="";
+  $("#clip-review-card").style.display="none";
+  $("#clip-segments").innerHTML="";
+}
+
 async function refresh(){
   refreshSocial();
   try{
@@ -480,10 +801,26 @@ async function refresh(){
       lastSig=sig;
       const box=$("#jobs");
       if(!d.jobs.length){box.innerHTML=`<div class="empty"><div class="big">🎬</div><div>No scripts yet. Click <b>New Script</b> to get started.</div></div>`;}
-      else{box.innerHTML=d.jobs.map(renderJob).join("");}
+      else{box.innerHTML=d.jobs.map((j,i)=>renderJob(j,i<4)).join("");}
     }
   }catch(e){/* server may be starting */}
 }
+
+window.openVideoModal=url=>{
+  const player=$("#video-modal-player");
+  player.src=url;
+  $("#video-modal").style.display="flex";
+  player.play().catch(()=>{});
+};
+function closeVideoModal(){
+  const player=$("#video-modal-player");
+  player.pause();
+  player.removeAttribute("src");
+  player.load();
+  $("#video-modal").style.display="none";
+}
+$("#video-modal-close").onclick=closeVideoModal;
+$("#video-modal").onclick=e=>{ if(e.target.id==="video-modal") closeVideoModal(); };
 
 window.copyIcon=async b=>{try{await navigator.clipboard.writeText(b.dataset.copy||"");const o=b.textContent;b.textContent="✓";b.classList.add("copied");setTimeout(()=>{b.textContent=o;b.classList.remove("copied")},1200);}catch(e){toast("Copy failed","err")}};
 window.retryJob=async id=>{try{await api("/jobs/"+id+"/retry",{method:"POST"});lastSig="";refresh();toast("Re-queued")}catch(e){toast(e.message,"err")}};
@@ -531,6 +868,10 @@ $("#tt-btn").onclick=()=>{
   if(social.tiktok&&social.tiktok.connected){ if(confirm("Disconnect TikTok?"))api("/tiktok/disconnect",{method:"POST"}).then(()=>{refreshSocial();toast("TikTok disconnected")}); }
   else connectPlatform("tiktok");
 };
+$("#fb-btn").onclick=()=>{
+  if(social.facebook&&social.facebook.connected){ if(confirm("Disconnect Facebook (and Instagram)?"))api("/facebook/disconnect",{method:"POST"}).then(()=>{refreshSocial();toast("Facebook disconnected")}); }
+  else connectPlatform("facebook");
+};
 window.addEventListener("message",e=>{ if(e.data==="mpt-social-updated"){refreshSocial();toast("Connection updated");} });
 window.publishJob=async(id,platforms)=>{
   toast("Publishing…");
@@ -552,6 +893,55 @@ $("#auto-btn").onclick=async()=>{
   }catch(e){toast(e.message,"err")}
 };
 
+/* "My Media" for the quick Generate-1-video flow */
+let genOneMaterials=[];
+function renderGenOneMaterialsList(){
+  $("#gen-one-materials-list").innerHTML=genOneMaterials.map((m,i)=>`
+    <span class="pill off" style="gap:6px">${m.kind==="image"?"🖼️":"🎬"} ${esc(m.filename)}
+      <a href="#" onclick="removeGenOneMaterial(${i});return false" style="color:var(--red);margin-left:4px">✕</a>
+    </span>`).join("");
+}
+window.removeGenOneMaterial=(i)=>{genOneMaterials.splice(i,1);renderGenOneMaterialsList();};
+$("#gen-one-style").onchange=()=>{
+  $("#gen-one-materials-wrap").style.display=$("#gen-one-style").value==="local"?"block":"none";
+};
+$("#gen-one-materials-upload").onclick=async()=>{
+  const files=$("#gen-one-materials-file").files;
+  if(!files.length){toast("Choose photos or videos first","err");return;}
+  const btn=$("#gen-one-materials-upload");btn.disabled=true;btn.textContent="Uploading…";
+  try{
+    const fd=new FormData();
+    for(const f of files)fd.append("files",f);
+    const r=await fetch(API+"/materials/upload",{method:"POST",body:fd});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||(j.status&&j.status>=400))throw new Error(j.message||("HTTP "+r.status));
+    const d=j.data!==undefined?j.data:j;
+    genOneMaterials.push(...(d.materials||[]));
+    renderGenOneMaterialsList();
+    $("#gen-one-materials-file").value="";
+    toast((d.materials||[]).length+" file(s) uploaded");
+  }catch(e){toast(e.message,"err")}
+  finally{btn.disabled=false;btn.textContent="Upload";}
+};
+
+$("#gen-one-btn").onclick=async()=>{
+  if($("#gen-one-style").value==="local" && !genOneMaterials.length){
+    toast("Upload at least one photo or video for 'My Media' style","err");return;
+  }
+  const btn=$("#gen-one-btn");btn.disabled=true;btn.textContent="🎬 Generating…";
+  try{
+    await api("/generate-one",{method:"POST",body:JSON.stringify({
+      video_source:$("#gen-one-style").value,
+      video_aspect:$("#gen-one-aspect").value,
+      video_materials:genOneMaterials.length?genOneMaterials.map(m=>m.rel_path):null,
+    })});
+    toast("Video idea generated — queued for rendering");
+    genOneMaterials=[];renderGenOneMaterialsList();$("#gen-one-materials-wrap").style.display="none";$("#gen-one-style").value="";
+    refresh();
+  }catch(e){toast(e.message,"err")}
+  finally{btn.disabled=false;btn.textContent="🎬 Generate 1 video"}
+};
+
 /* Generate script with AI */
 $("#gen-script").onclick=async()=>{
   const subject=$("#f-subject").value.trim();
@@ -564,25 +954,68 @@ $("#gen-script").onclick=async()=>{
   finally{btn.disabled=false;btn.textContent="✨ Generate with AI"}
 };
 
+/* My Media: upload photos/videos to use as this job's visuals */
+let uploadedMaterials=[];
+function renderMaterialsList(){
+  $("#f-materials-list").innerHTML=uploadedMaterials.map((m,i)=>`
+    <span class="pill off" style="gap:6px">${m.kind==="image"?"🖼️":"🎬"} ${esc(m.filename)}
+      <a href="#" onclick="removeMaterial(${i});return false" style="color:var(--red);margin-left:4px">✕</a>
+    </span>`).join("");
+}
+window.removeMaterial=(i)=>{uploadedMaterials.splice(i,1);renderMaterialsList();};
+function toggleMaterialsWrap(){
+  $("#f-materials-wrap").style.display=$("#f-style").value==="local"?"block":"none";
+}
+$("#f-style").onchange=toggleMaterialsWrap;
+$("#f-materials-upload").onclick=async()=>{
+  const files=$("#f-materials-file").files;
+  if(!files.length){toast("Choose photos or videos first","err");return;}
+  const btn=$("#f-materials-upload");btn.disabled=true;btn.textContent="Uploading…";
+  try{
+    const fd=new FormData();
+    for(const f of files)fd.append("files",f);
+    const r=await fetch(API+"/materials/upload",{method:"POST",body:fd});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||(j.status&&j.status>=400))throw new Error(j.message||("HTTP "+r.status));
+    const d=j.data!==undefined?j.data:j;
+    uploadedMaterials.push(...(d.materials||[]));
+    renderMaterialsList();
+    $("#f-materials-file").value="";
+    toast((d.materials||[]).length+" file(s) uploaded");
+  }catch(e){toast(e.message,"err")}
+  finally{btn.disabled=false;btn.textContent="Upload";}
+};
+
 /* Save job */
 $("#save-job").onclick=async()=>{
   const subject=$("#f-subject").value.trim();
   if(!subject){toast("Video subject is required","err");return;}
+  if($("#f-style").value==="local" && !uploadedMaterials.length){
+    toast("Upload at least one photo or video for 'My Media' style","err");return;
+  }
   const body={
     title:$("#f-title").value.trim(),
     video_subject:subject,
     video_script:$("#f-script").value.trim(),
     video_terms:$("#f-terms").value.trim(),
     video_aspect:$("#f-aspect").value,
+    video_source:$("#f-style").value,
     voice_name:$("#f-voice").value,
     video_clip_duration:parseInt($("#f-clip").value)||5,
     video_count:parseInt($("#f-count").value)||1,
     subtitle_enabled:$("#f-subs").checked,
+    video_transition_mode:$("#f-transition").value,
+    video_concat_mode:$("#f-concat").value,
+    voice_rate:parseFloat($("#f-voice-rate").value)||1.0,
+    bgm_type:$("#f-bgm").value,
+    use_logo:$("#f-use-logo").checked,
+    video_materials:uploadedMaterials.length?uploadedMaterials.map(m=>m.rel_path):null,
   };
   const btn=$("#save-job");btn.disabled=true;
   try{
     await api("/jobs",{method:"POST",body:JSON.stringify(body)});
     ["#f-title","#f-subject","#f-script","#f-terms"].forEach(s=>$(s).value="");
+    uploadedMaterials=[];renderMaterialsList();$("#f-materials-wrap").style.display="none";
     toast("Added to queue");lastSig="";show("dashboard");refresh();
   }catch(e){toast(e.message,"err")}
   finally{btn.disabled=false}
@@ -601,6 +1034,11 @@ async function loadSettings(){
     $("#s-pexels").value=s.pexels_api_key||"";
     $("#s-pixabay").value=s.pixabay_api_key||"";
     $("#s-source").value=s.video_source||"pexels";
+    $("#s-ai-style").value=s.ai_visual_style||"";
+    $("#s-ai-style-wrap").style.display=$("#s-source").value==="ai"?"block":"none";
+    toggleAvatarSection();
+    $("#s-replicate-token").value=s.replicate_api_token||"";
+    $("#s-topic-template").value=s.auto_topic_template||"";
     $("#s-extra").value=s.extra_token||"";
     $("#s-provider").value=s.llm_provider||"groq";
     $("#s-groq-key").value=s.groq_api_key||"";
@@ -612,11 +1050,19 @@ async function loadSettings(){
     $("#s-subs").checked=s.subtitle_enabled!==false;
     $("#s-yt-id").value=s.youtube_client_id||"";
     $("#s-yt-secret").value=s.youtube_client_secret||"";
+    $("#s-yt-cap").value=s.youtube_daily_cap??0;
     $("#s-tt-key").value=s.tiktok_client_key||"";
     $("#s-tt-secret").value=s.tiktok_client_secret||"";
     const base=(s.publish_base_url||"http://localhost:8080").replace(/\/$/,"");
     $("#s-baseurl").value=base;
     updateRedirects(base);
+    $("#s-smtp-host").value=s.smtp_host||"";
+    $("#s-smtp-port").value=s.smtp_port||587;
+    $("#s-smtp-user").value=s.smtp_username||"";
+    $("#s-smtp-pass").value=s.smtp_password||"";
+    $("#s-smtp-from-email").value=s.smtp_from_email||"";
+    $("#s-smtp-from-name").value=s.smtp_from_name||"Vidzy";
+    $("#s-admin-notify").value=s.admin_notify_email||"";
   }catch(e){toast("Could not load settings","err")}
 }
 function updateRedirects(b){
@@ -625,11 +1071,24 @@ function updateRedirects(b){
   $("#s-redirect-tt").value=b+"/api/v1/saas/tiktok/callback";
 }
 $("#s-baseurl").oninput=()=>updateRedirects($("#s-baseurl").value);
+function toggleAvatarSection(){
+  const display=$("#s-source").value==="avatar"?"block":"none";
+  ["#s-avatar-wrap","#s-avatar-hint","#s-avatar-token-wrap"].forEach(sel=>{
+    $(sel).style.display=display;
+  });
+}
+$("#s-source").onchange=()=>{
+  $("#s-ai-style-wrap").style.display=$("#s-source").value==="ai"?"block":"none";
+  toggleAvatarSection();
+};
 $("#save-settings").onclick=async()=>{
   const body={
     pexels_api_key:$("#s-pexels").value.trim(),
     pixabay_api_key:$("#s-pixabay").value.trim(),
     video_source:$("#s-source").value,
+    ai_visual_style:$("#s-ai-style").value.trim(),
+    replicate_api_token:$("#s-replicate-token").value.trim(),
+    auto_topic_template:$("#s-topic-template").value.trim(),
     extra_token:$("#s-extra").value.trim(),
     llm_provider:$("#s-provider").value,
     groq_api_key:$("#s-groq-key").value.trim(),
@@ -641,22 +1100,33 @@ $("#save-settings").onclick=async()=>{
     subtitle_enabled:$("#s-subs").checked,
     youtube_client_id:$("#s-yt-id").value.trim(),
     youtube_client_secret:$("#s-yt-secret").value.trim(),
+    youtube_daily_cap:parseInt($("#s-yt-cap").value,10)||0,
     tiktok_client_key:$("#s-tt-key").value.trim(),
     tiktok_client_secret:$("#s-tt-secret").value.trim(),
     publish_base_url:$("#s-baseurl").value.trim()||"http://localhost:8080",
+    smtp_host:$("#s-smtp-host").value.trim(),
+    smtp_port:parseInt($("#s-smtp-port").value,10)||587,
+    smtp_username:$("#s-smtp-user").value.trim(),
+    smtp_password:$("#s-smtp-pass").value,
+    smtp_from_email:$("#s-smtp-from-email").value.trim(),
+    smtp_from_name:$("#s-smtp-from-name").value.trim()||"Vidzy",
+    admin_notify_email:$("#s-admin-notify").value.trim(),
   };
   const btn=$("#save-settings");btn.disabled=true;
   try{await adminApi("/settings",{method:"POST",body:JSON.stringify(body)});toast("Settings saved");}
   catch(e){toast(e.message,"err")}finally{btn.disabled=false}
 };
 
-/* Profile (per-account business branding) */
+/* Profile (per-account business branding + video preferences) */
+let currentProfile={};
 async function loadProfile(){
   try{
     const p=await api("/profile");
+    currentProfile=p;
     $("#p-name").value=p.business_name||"";
     $("#p-website").value=p.business_website||"";
     $("#p-email").value=p.business_email||"";
+    $("#p-phone").value=p.business_phone||"";
     $("#p-address").value=p.business_address||"";
     $("#p-bio").value=p.business_bio||"";
     $("#p-autopub").checked=!!p.auto_publish;
@@ -664,26 +1134,170 @@ async function loadProfile(){
     $("#p-pub-yt").checked=plats.includes("youtube");
     $("#p-pub-tt").checked=plats.includes("tiktok");
     $("#p-yt-privacy").value=p.youtube_privacy||"public";
+    $("#p-aspect").value=p.video_aspect||"";
+    $("#p-subpos").value=p.subtitle_position||"";
+    $("#p-subtitle-pref").value=p.subtitle_pref||"default";
+    $("#p-use-logo").checked=!!p.use_logo;
+    if(p.has_logo){
+      $("#p-logo-preview").src=API+"/profile/logo?_ts="+Date.now();
+      $("#p-logo-preview").style.display="inline-block";
+      $("#p-logo-remove").style.display="inline-block";
+    }else{
+      $("#p-logo-preview").style.display="none";
+      $("#p-logo-remove").style.display="none";
+    }
+    if(p.has_avatar_photo){
+      $("#p-avatar-preview").src="/media/"+p.avatar_image_path+"?_ts="+Date.now();
+      $("#p-avatar-preview").style.display="inline-block";
+      $("#p-avatar-remove").style.display="inline-block";
+    }else{
+      $("#p-avatar-preview").style.display="none";
+      $("#p-avatar-remove").style.display="none";
+    }
   }catch(e){toast("Could not load profile","err")}
 }
+$("#p-logo-upload").onclick=async()=>{
+  const f=$("#p-logo-file").files[0];
+  if(!f){toast("Choose an image file first","err");return;}
+  const btn=$("#p-logo-upload");btn.disabled=true;btn.textContent="Uploading…";
+  try{
+    const fd=new FormData();fd.append("file",f);
+    const r=await fetch(API+"/profile/logo",{method:"POST",body:fd});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||(j.status&&j.status>=400))throw new Error(j.message||("HTTP "+r.status));
+    const p=j.data!==undefined?j.data:j;
+    currentProfile=p;
+    $("#p-logo-file").value="";
+    $("#p-logo-preview").src=API+"/profile/logo?_ts="+Date.now();
+    $("#p-logo-preview").style.display="inline-block";
+    $("#p-logo-remove").style.display="inline-block";
+    toast("Logo uploaded");
+  }catch(e){toast(e.message,"err")}
+  finally{btn.disabled=false;btn.textContent="Upload logo";}
+};
+$("#p-logo-remove").onclick=async()=>{
+  try{
+    const p=await api("/profile/logo",{method:"DELETE"});
+    currentProfile=p;
+    $("#p-logo-preview").style.display="none";
+    $("#p-logo-remove").style.display="none";
+    $("#p-use-logo").checked=false;
+    toast("Logo removed");
+  }catch(e){toast(e.message,"err")}
+};
+$("#p-avatar-upload").onclick=async()=>{
+  const f=$("#p-avatar-file").files[0];
+  if(!f){toast("Choose an image file first","err");return;}
+  const btn=$("#p-avatar-upload");btn.disabled=true;btn.textContent="Uploading…";
+  try{
+    const fd=new FormData();fd.append("file",f);
+    const r=await fetch(API+"/profile/avatar-photo",{method:"POST",body:fd});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||(j.status&&j.status>=400))throw new Error(j.message||("HTTP "+r.status));
+    const p=j.data!==undefined?j.data:j;
+    currentProfile=p;
+    $("#p-avatar-file").value="";
+    $("#p-avatar-preview").src="/media/"+p.avatar_image_path+"?_ts="+Date.now();
+    $("#p-avatar-preview").style.display="inline-block";
+    $("#p-avatar-remove").style.display="inline-block";
+    toast("Presenter photo uploaded");
+  }catch(e){toast(e.message,"err")}
+  finally{btn.disabled=false;btn.textContent="Upload photo";}
+};
+$("#p-avatar-remove").onclick=async()=>{
+  try{
+    const p=await api("/profile/avatar-photo",{method:"DELETE"});
+    currentProfile=p;
+    $("#p-avatar-preview").style.display="none";
+    $("#p-avatar-remove").style.display="none";
+    toast("Presenter photo removed");
+  }catch(e){toast(e.message,"err")}
+};
+
+/* API tab */
+function apiExampleSnippets(){
+  const base=location.origin;
+  $("#api-base-url").value=base;
+  $("#api-example-create").value=
+`curl -X POST ${base}/api/v1/external/v1/videos \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "subject": "5 tips for a healthy morning routine",
+    "aspect_ratio": "9:16",
+    "style": "stock"
+  }'`;
+  $("#api-example-status").value=
+`curl ${base}/api/v1/external/v1/videos/JOB_ID \\
+  -H "Authorization: Bearer YOUR_API_KEY"`;
+  $("#api-example-list").value=
+`curl ${base}/api/v1/external/v1/videos \\
+  -H "Authorization: Bearer YOUR_API_KEY"`;
+}
+async function loadApiKey(){
+  apiExampleSnippets();
+  try{
+    const d=await api("/api-key");
+    if(d.has_key){
+      $("#api-key-status").textContent="Active key: "+d.key_prefix+"… (created "+fmtDate(d.created_at)+")";
+      $("#api-key-generate").textContent="Regenerate key";
+      $("#api-key-revoke").style.display="inline-flex";
+    }else{
+      $("#api-key-status").textContent="No API key yet - generate one to get started.";
+      $("#api-key-generate").textContent="Generate new key";
+      $("#api-key-revoke").style.display="none";
+    }
+  }catch(e){toast("Could not load API key status","err")}
+}
+$("#api-key-generate").onclick=async()=>{
+  if($("#api-key-revoke").style.display!=="none" && !confirm("Generating a new key immediately disables the old one. Continue?"))return;
+  const btn=$("#api-key-generate");btn.disabled=true;
+  try{
+    const d=await api("/api-key/generate",{method:"POST"});
+    $("#api-key-value").value=d.api_key;
+    $("#api-key-reveal").style.display="block";
+    await loadApiKey();
+    toast("New API key generated");
+  }catch(e){toast(e.message,"err")}
+  finally{btn.disabled=false}
+};
+$("#api-key-revoke").onclick=async()=>{
+  if(!confirm("Revoke your API key? Any integration using it will stop working immediately."))return;
+  try{
+    await api("/api-key",{method:"DELETE"});
+    $("#api-key-reveal").style.display="none";
+    await loadApiKey();
+    toast("API key revoked");
+  }catch(e){toast(e.message,"err")}
+};
+$("#api-key-copy").onclick=async()=>{
+  try{await navigator.clipboard.writeText($("#api-key-value").value);toast("Copied");}
+  catch(e){toast("Copy failed","err")}
+};
 $("#save-profile").onclick=async()=>{
   const body={
     business_name:$("#p-name").value.trim(),
     business_website:$("#p-website").value.trim(),
     business_email:$("#p-email").value.trim(),
+    business_phone:$("#p-phone").value.trim(),
     business_address:$("#p-address").value.trim(),
     business_bio:$("#p-bio").value.trim(),
     auto_publish:$("#p-autopub").checked,
     auto_publish_platforms:[...($("#p-pub-yt").checked?["youtube"]:[]),...($("#p-pub-tt").checked?["tiktok"]:[])],
     youtube_privacy:$("#p-yt-privacy").value,
+    video_aspect:$("#p-aspect").value,
+    subtitle_position:$("#p-subpos").value,
+    subtitle_pref:$("#p-subtitle-pref").value,
+    use_logo:$("#p-use-logo").checked,
   };
   const btn=$("#save-profile");btn.disabled=true;
-  try{await api("/profile",{method:"POST",body:JSON.stringify(body)});toast("Profile saved");}
+  try{currentProfile=await api("/profile",{method:"POST",body:JSON.stringify(body)});toast("Profile saved");}
   catch(e){toast(e.message,"err")}finally{btn.disabled=false}
 };
 
 /* boot */
 refresh();
+loadProfile();
 setInterval(refresh,2000);
 </script>
 </body>
