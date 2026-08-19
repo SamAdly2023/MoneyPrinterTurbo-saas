@@ -1,0 +1,114 @@
+.vi-wrap .vi-stats-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+	gap: 12px;
+	margin: 20px 0;
+	max-width: 700px;
+}
+
+.vi-stat-tile {
+	background: #fff;
+	border: 1px solid #ccd0d4;
+	border-radius: 4px;
+	padding: 14px 16px;
+}
+
+.vi-stat-value {
+	font-size: 24px;
+	font-weight: 600;
+	line-height: 1.2;
+}
+
+.vi-stat-label {
+	color: #646970;
+	font-size: 12px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.vi-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 10px;
+	margin: 16px 0;
+}
+
+.vi-toolbar-spacer {
+	flex: 1;
+}
+
+.vi-sessions-table td {
+	vertical-align: top;
+}
+
+.vi-muted {
+	color: #646970;
+	font-size: 12px;
+}
+
+.vi-pagination {
+	margin: 14px 0;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.vi-modal {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.5);
+	display: flex;
+	align-items: flex-start;
+	justify-content: center;
+	padding-top: 60px;
+	z-index: 100000;
+}
+
+/* An author stylesheet rule always beats the browser's built-in
+   [hidden] { display: none } default, so .vi-modal's own display:flex
+   would otherwise keep the modal visible even after JS sets the hidden
+   attribute. This re-asserts it with higher specificity. */
+.vi-modal[hidden] {
+	display: none;
+}
+
+.vi-modal-content {
+	background: #fff;
+	border-radius: 6px;
+	padding: 24px;
+	width: 520px;
+	max-width: 90vw;
+	max-height: 80vh;
+	overflow-y: auto;
+}
+
+.vi-form-grid {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 10px;
+	margin: 14px 0;
+}
+
+.vi-form-grid input {
+	width: 100%;
+}
+
+.vi-modal-actions {
+	display: flex;
+	gap: 10px;
+	margin-top: 16px;
+}
+
+.vi-st-results pre {
+	background: #f6f7f7;
+	padding: 10px;
+	border-radius: 4px;
+	max-height: 240px;
+	overflow: auto;
+	font-size: 11px;
+}
+
+.vi-error {
+	color: #d63638;
+}

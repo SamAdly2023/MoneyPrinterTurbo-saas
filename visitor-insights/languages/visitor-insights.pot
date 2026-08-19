@@ -1,0 +1,13 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: Visitor Insights & Skip Trace 1.0.0\n"
+"Report-Msgid-Bugs-To: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2026-01-01T00:00:00+00:00\n"
+"X-Domain: visitor-insights\n"
+
+#. This is a placeholder header only. Regenerate the full catalog before
+#. each release with WP-CLI from the plugin directory:
+#.   wp i18n make-pot . languages/visitor-insights.pot --domain=visitor-insights
