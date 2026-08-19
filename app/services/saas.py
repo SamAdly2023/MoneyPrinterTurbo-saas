@@ -720,7 +720,11 @@ class Engine:
         while True:
             state = firestore_db.get_engine_state()
             if state["paused"]:
-                time.sleep(1)
+                # Wait on the event rather than sleeping: resume() calls wake(),
+                # so this still returns instantly, but a paused engine now costs
+                # ~6K Firestore reads/day per worker instead of ~86K.
+                self._wake.wait(timeout=15)
+                self._wake.clear()
                 continue
 
             next_job = store.next_pending(worker_id)
@@ -736,7 +740,10 @@ class Engine:
                 auto_cooldown_until = time.time() + 30
 
             # Idle: wait until woken by a new job / resume / settings change.
-            self._wake.wait(timeout=5)
+            # Every new job calls wake(), so the timeout is only a safety net -
+            # it does not delay job pickup, it just stops the idle loop from
+            # re-reading engine state 17K times a day per worker.
+            self._wake.wait(timeout=20)
             self._wake.clear()
 
     def _auto_generate(self, worker_id: str) -> bool:

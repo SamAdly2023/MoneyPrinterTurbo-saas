@@ -1298,7 +1298,18 @@ $("#save-profile").onclick=async()=>{
 /* boot */
 refresh();
 loadProfile();
-setInterval(refresh,2000);
+/* Poll slowly, and only while the tab is actually visible. Every /jobs call
+   costs one Firestore read per job plus three more, so the old 2s timer on a
+   dashboard left open all day burned ~650K reads/day by itself - 13x the free
+   daily quota - whether or not anyone was looking at it. */
+const POLL_MS=15000;
+let pollTimer=null;
+function startPolling(){ if(!pollTimer) pollTimer=setInterval(refresh,POLL_MS); }
+function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
+document.addEventListener("visibilitychange",()=>{
+  if(document.hidden){ stopPolling(); } else { refresh(); startPolling(); }
+});
+if(!document.hidden) startPolling();
 </script>
 </body>
 </html>

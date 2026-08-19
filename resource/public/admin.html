@@ -440,7 +440,14 @@ async function refreshAll(){
   catch(e){ toast(e.message,"err"); }
 }
 refreshAll();
-setInterval(refreshAll, 4000);
+/* Same reasoning as the dashboard: only poll a visible tab, and slowly. */
+let adminTimer=null;
+function startAdminPolling(){ if(!adminTimer) adminTimer=setInterval(refreshAll,20000); }
+function stopAdminPolling(){ if(adminTimer){ clearInterval(adminTimer); adminTimer=null; } }
+document.addEventListener("visibilitychange",()=>{
+  if(document.hidden){ stopAdminPolling(); } else { refreshAll(); startAdminPolling(); }
+});
+if(!document.hidden) startAdminPolling();
 
 /* Visitors tab */
 let allVisitorSessions=[], visitorsLoaded=false;
