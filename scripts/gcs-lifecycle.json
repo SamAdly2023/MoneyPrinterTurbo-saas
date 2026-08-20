@@ -1,0 +1,20 @@
+{
+  "lifecycle": {
+    "rule": [
+      {
+        "action": { "type": "Delete" },
+        "condition": {
+          "age": 7,
+          "matchesPrefix": ["storage/cache_videos/"]
+        }
+      },
+      {
+        "action": { "type": "Delete" },
+        "condition": {
+          "age": 14,
+          "matchesPrefix": ["storage/tasks/"]
+        }
+      }
+    ]
+  }
+}
