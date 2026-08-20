@@ -542,6 +542,8 @@
         <div class="grid2">
           <div class="field"><label>TikTok client key</label><input id="s-tt-key" placeholder="aw..." /></div>
           <div class="field"><label>TikTok client secret</label><input id="s-tt-secret" placeholder="..." /></div>
+          <div class="field"><label>Facebook / Instagram app ID <span class="desc">one Meta app covers both</span></label><input id="s-fb-id" placeholder="1234567890..." /></div>
+          <div class="field"><label>Facebook / Instagram app secret</label><input id="s-fb-secret" placeholder="..." /></div>
         </div>
 
         <div class="section-title">Email notifications</div>
@@ -1060,6 +1062,8 @@ async function loadSettings(){
     $("#s-yt-cap").value=s.youtube_daily_cap??0;
     $("#s-tt-key").value=s.tiktok_client_key||"";
     $("#s-tt-secret").value=s.tiktok_client_secret||"";
+    $("#s-fb-id").value=s.facebook_app_id||"";
+    $("#s-fb-secret").value=s.facebook_app_secret||"";
     const base=(s.publish_base_url||"http://localhost:8080").replace(/\/$/,"");
     $("#s-baseurl").value=base;
     updateRedirects(base);
@@ -1110,6 +1114,8 @@ $("#save-settings").onclick=async()=>{
     youtube_daily_cap:parseInt($("#s-yt-cap").value,10)||0,
     tiktok_client_key:$("#s-tt-key").value.trim(),
     tiktok_client_secret:$("#s-tt-secret").value.trim(),
+    facebook_app_id:$("#s-fb-id").value.trim(),
+    facebook_app_secret:$("#s-fb-secret").value.trim(),
     publish_base_url:$("#s-baseurl").value.trim()||"http://localhost:8080",
     smtp_host:$("#s-smtp-host").value.trim(),
     smtp_port:parseInt($("#s-smtp-port").value,10)||587,
