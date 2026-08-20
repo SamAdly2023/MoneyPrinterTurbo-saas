@@ -39,3 +39,6 @@ streamlit.log
 .codegraph
 /docs/superpowers
 .understand-anything
+
+# Local run environment (see Run-Vidzy-Local.bat)
+.venv-local/
