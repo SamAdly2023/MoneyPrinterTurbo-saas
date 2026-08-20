@@ -39,6 +39,7 @@ from app.services import clips
 from app.services import firestore_db
 from app.services import llm
 from app.services import publish
+from app.services import render_dispatch
 from app.services import state as sm
 from app.services import task as tm
 from app.utils import utils
@@ -126,7 +127,11 @@ def create_job(uid: str, title: str, params: dict, auto: bool = False, kind: str
         "auto": auto,
     }
     job = store.add(uid, job)
-    engine.wake()
+    # In cloudrun_job mode the API does not render anything itself - it starts
+    # a Job execution that does. If that call fails for any reason we fall
+    # back to the in-process engine rather than leaving the job stranded.
+    if not render_dispatch.trigger():
+        engine.wake()
     logger.info(f"queued {kind} job {job['id']} for {uid} - {job['title']}")
     return job
 
@@ -664,6 +669,12 @@ class Engine:
             return
         self._started = True
         store.reset_stuck_jobs()
+        if render_dispatch.enabled():
+            # Rendering happens in a Cloud Run Job. Starting worker threads
+            # here would defeat the point: they are what forced this service
+            # to keep CPU allocated 24/7 in the first place.
+            logger.success("render mode: cloud run jobs (no in-process workers)")
+            return
         for i in range(self.NUM_WORKERS):
             worker_id = f"{utils.get_uuid(remove_hyphen=True)[:8]}-w{i}"
             t = threading.Thread(target=self._run, args=(worker_id,), name=f"saas-engine-{i}", daemon=True)
@@ -713,6 +724,15 @@ class Engine:
             "current_job_id": processing[0].get("id") if processing else None,
             "current_uid": processing[0].get("uid") if processing else None,
         }
+
+    # -- entry points for the Cloud Run Job worker ---------------------------
+    def process_job(self, uid: str, job: dict):
+        """Render one already-claimed job. Used by render_worker.py."""
+        self._process(uid, job)
+
+    def generate_auto_job(self, worker_id: str) -> bool:
+        """Queue one Auto Mode job if any user is due one. Used by render_worker.py."""
+        return self._auto_generate(worker_id)
 
     # -- worker loop ---------------------------------------------------------
     def _run(self, worker_id: str):
