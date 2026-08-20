@@ -65,12 +65,12 @@ gcloud run jobs add-iam-policy-binding moneyprinterturbo-render \
 gcloud run services update moneyprinterturbo \
   --region us-central1 \
   --update-env-vars MPT_RENDER_MODE=cloudrun_job,MPT_RENDER_JOB=moneyprinterturbo-render,MPT_RENDER_JOB_REGION=us-central1 \
-  --cpu 1 --memory 2Gi --cpu-throttling
+  --cpu 1 --memory 4Gi --cpu-throttling
 ```
 
-This is the line that stops the ~$305/month. If the API OOMs on startup,
-raise to `--memory 4Gi`; throttled CPU is billed per request-second, so a
-larger ceiling costs little.
+This is the line that stops the ~$305/month. 4 GiB was chosen over 2 GiB
+because the API imports the full render pipeline at startup; throttled CPU is
+billed per request-second, so the larger ceiling costs almost nothing.
 
 **4. Auto Mode**
 
@@ -110,8 +110,25 @@ gcloud run services update moneyprinterturbo --region us-central1 \
 
 The old in-process engine starts again on the next revision.
 
-## Untested
+## Deployed
 
-None of this has run yet — billing was disabled on the project while it was
-written, so the service could not start. Expect to iterate on step 3's memory
-ceiling and on IAM propagation on the first real deploy.
+Live since revision `moneyprinterturbo-00040-66q`:
+
+- service: 1 vCPU / 4 GiB, `cpu-throttling: true`, `MPT_RENDER_MODE=cloudrun_job`
+- job: `moneyprinterturbo-render`, 4 vCPU / 8 GiB, task timeout 3600s
+- scheduler: `mpt-auto-mode`, hourly at :00 UTC
+
+Verified: the service logs `render mode: cloud run jobs (no in-process
+workers)` at startup, and a manual execution of the job logged `render worker
+job-dda33a78 starting` / `rendered 0 job(s) in 0s` against an empty queue.
+
+Still unexercised: the dispatch call itself (service -> job) only fires when a
+signed-in user queues a video, which needs a real login to test.
+
+## Gotcha: Git Bash mangles the mount path
+
+On Windows, running these commands in Git Bash rewrites `/data` into a
+Windows path, and job creation fails with "should be a valid unix absolute
+path". That is also where the existing service's odd `//data/storage` comes
+from. Use PowerShell for anything containing an absolute container path, or
+prefix with `MSYS_NO_PATHCONV=1`.
