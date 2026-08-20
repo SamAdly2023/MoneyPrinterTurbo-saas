@@ -34,17 +34,23 @@ if not exist ".venv-local\Scripts\python.exe" (
 if not exist "%APPDATA%\gcloud\application_default_credentials.json" (
   echo.
   echo   ============================================================
-  echo    One-time setup needed: Google sign-in for the database
+  echo    One-time setup: sign in to Google so the app can reach
+  echo    the database. Your browser is opening now.
+  echo.
+  echo    Sign in as samadly728@gmail.com and click Allow.
   echo   ============================================================
   echo.
-  echo   Run this command once, sign in as samadly728@gmail.com:
+  call gcloud auth application-default login
+  if not exist "%APPDATA%\gcloud\application_default_credentials.json" (
+    echo.
+    echo   Sign-in did not complete. Close this window and try again.
+    echo.
+    pause
+    exit /b 1
+  )
   echo.
-  echo       gcloud auth application-default login
+  echo   Signed in. Starting Vidzy...
   echo.
-  echo   Then double-click this icon again.
-  echo.
-  pause
-  exit /b 1
 )
 
 echo.
