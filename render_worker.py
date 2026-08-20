@@ -46,6 +46,14 @@ from app.utils import utils  # noqa: E402
 MAX_JOBS = max(1, int(os.getenv("MPT_WORKER_MAX_JOBS", "25")))
 MAX_SECONDS = max(60, int(os.getenv("MPT_WORKER_MAX_SECONDS", "3000")))
 
+# How many Auto Mode videos one scheduled run may create. This has to be small,
+# and it has to be enforced here: claim_next_auto_mode_user() only round-robins
+# by "who waited longest" - there is no per-user daily cap anywhere in the
+# codebase. With a single auto-mode user it returns that same user every call,
+# so an unbounded loop would generate videos until it hit MAX_JOBS, every hour.
+# Videos per day = this number x how often Cloud Scheduler fires.
+AUTO_MAX = max(1, int(os.getenv("MPT_WORKER_AUTO_MAX", "1")))
+
 
 def _drain(worker_id: str) -> int:
     """Claim and render pending jobs until the queue empties. Returns the count."""
@@ -94,7 +102,7 @@ def _auto_round(worker_id: str) -> int:
     render_dispatch.suppress()
 
     generated = 0
-    while generated < MAX_JOBS and saas.engine.generate_auto_job(worker_id):
+    while generated < AUTO_MAX and saas.engine.generate_auto_job(worker_id):
         generated += 1
 
     if generated:

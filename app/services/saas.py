@@ -45,6 +45,11 @@ from app.services import task as tm
 from app.utils import utils
 
 # Job lifecycle statuses used by the dashboard.
+# Once a video is live on every platform the user asked for, the copy in our
+# bucket is dead weight - the platforms host it now. Off by default because it
+# also removes the Download button from that job's card.
+DELETE_AFTER_PUBLISH = os.getenv("MPT_DELETE_AFTER_PUBLISH", "").strip().lower() in ("1", "true", "yes")
+
 STATUS_PENDING = "pending"
 STATUS_PROCESSING = "processing"
 STATUS_DONE = "done"
@@ -968,8 +973,33 @@ class Engine:
                 logger.info(f"auto-published job {job_id} to {ok}")
             if failed:
                 logger.warning(f"auto-publish failed for job {job_id}: {failed}")
+            elif ok and DELETE_AFTER_PUBLISH:
+                self._drop_published_files(uid, job_id, urls)
         except Exception as e:  # noqa: BLE001 - publishing must never fail a render
             logger.warning(f"auto-publish failed for {job_id}: {e}")
+
+    def _drop_published_files(self, uid: str, job_id: str, urls: list):
+        """Delete a job's rendered files once every requested platform has it.
+
+        Only called when nothing failed - a partial publish keeps its file so
+        the failed platform can be retried. The job keeps its publish results
+        (YouTube/TikTok ids), so the video is still reachable; it just loses
+        the in-dashboard player and Download button, which the UI handles by
+        checking videos.length before rendering either.
+        """
+        removed = 0
+        for u in urls:
+            path = os.path.join(output_dir(), os.path.basename(u))
+            try:
+                os.remove(path)
+                removed += 1
+            except FileNotFoundError:
+                pass
+            except Exception as e:  # noqa: BLE001 - never fail a finished render
+                logger.warning(f"could not delete {path}: {e}")
+        if removed:
+            store.update(uid, job_id, videos=[], storage_freed=True)
+            logger.info(f"freed {removed} published file(s) for job {job_id}")
 
 
 engine = Engine()
