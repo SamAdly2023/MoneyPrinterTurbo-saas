@@ -17,6 +17,12 @@ REM ---------------------------------------------------------------------------
 
 set "GOOGLE_CLOUD_PROJECT=vvvvv-504116"
 
+REM Local data lives in its own SQLite file (storage\vidzy.db), NOT in the
+REM Firestore the hosted site uses. Sharing one database meant videos rendered
+REM here showed up live pointing at files only this PC had, and live jobs got
+REM claimed by whichever machine polled first. Login still uses Firebase.
+set "MPT_DB=sqlite"
+
 REM winget installs ffmpeg into a versioned folder and only updates PATH for
 REM new sessions. Find it ourselves so this works right after installing, and
 REM keep working when ffmpeg is upgraded to a different version number.
