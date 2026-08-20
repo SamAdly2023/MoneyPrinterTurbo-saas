@@ -406,6 +406,8 @@
           <div style="display:flex;gap:18px;margin-top:4px">
             <label class="switch" style="font-weight:500"><input type="checkbox" id="p-pub-yt" /> YouTube</label>
             <label class="switch" style="font-weight:500"><input type="checkbox" id="p-pub-tt" /> TikTok (drafts)</label>
+            <label class="switch" style="font-weight:500"><input type="checkbox" id="p-pub-fb" /> Facebook Page</label>
+            <label class="switch" style="font-weight:500"><input type="checkbox" id="p-pub-ig" /> Instagram <span class="desc">(needs the hosted site - Meta fetches the video by URL)</span></label>
           </div>
         </div>
         <div class="field"><label>YouTube upload privacy</label>
@@ -1138,6 +1140,8 @@ async function loadProfile(){
     const plats=p.auto_publish_platforms||[];
     $("#p-pub-yt").checked=plats.includes("youtube");
     $("#p-pub-tt").checked=plats.includes("tiktok");
+    $("#p-pub-fb").checked=plats.includes("facebook");
+    $("#p-pub-ig").checked=plats.includes("instagram");
     $("#p-yt-privacy").value=p.youtube_privacy||"public";
     $("#p-aspect").value=p.video_aspect||"";
     $("#p-subpos").value=p.subtitle_position||"";
@@ -1288,7 +1292,7 @@ $("#save-profile").onclick=async()=>{
     business_address:$("#p-address").value.trim(),
     business_bio:$("#p-bio").value.trim(),
     auto_publish:$("#p-autopub").checked,
-    auto_publish_platforms:[...($("#p-pub-yt").checked?["youtube"]:[]),...($("#p-pub-tt").checked?["tiktok"]:[])],
+    auto_publish_platforms:[...($("#p-pub-yt").checked?["youtube"]:[]),...($("#p-pub-tt").checked?["tiktok"]:[]),...($("#p-pub-fb").checked?["facebook"]:[]),...($("#p-pub-ig").checked?["instagram"]:[])],
     youtube_privacy:$("#p-yt-privacy").value,
     video_aspect:$("#p-aspect").value,
     subtitle_position:$("#p-subpos").value,
