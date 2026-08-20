@@ -69,9 +69,12 @@
   .btn.danger:hover{background:#3a1c28}
   .btn:disabled{opacity:.5;cursor:not-allowed}
   .btn.sm{padding:7px 12px;font-size:13px}
-  /* Auto Mode hidden platform-wide for now (not yet a good fit for social
-     algorithms/upload limits) - remove this rule to bring it back. */
-  #auto-btn,#auto-banner{display:none !important}
+  /* Auto Mode is no longer hidden platform-wide. Visibility is decided at
+     runtime from the server's engine.auto_available: shown on the local app,
+     where rendering costs nothing, and hidden on the hosted site, where every
+     auto-generated video costs money. Starts hidden so it never flashes into
+     view before the first status response arrives. */
+  #auto-btn,#auto-banner{display:none}
   #auto-btn:not(.auto-on){border-color:#6b5620;color:#f5c56b;background:rgba(245,158,11,.08)}
   #auto-btn:not(.auto-on):hover{background:rgba(245,158,11,.16)}
   .btn.auto-on{background:linear-gradient(135deg,#f59e0b,#f97316);border:none;color:#1a1200;box-shadow:0 0 0 0 rgba(245,158,11,.6);animation:pulse 1.8s infinite}
@@ -800,7 +803,10 @@ async function refresh(){
     // hidden rather than shown-but-broken.
     const canAuto=!(d.engine&&d.engine.auto_available===false);
     const ab=$("#auto-btn");
-    ab.style.display=canAuto?"":"none";
+    // Explicit value, not "": the stylesheet defaults this button to
+    // display:none so it never flashes before the first status arrives, and
+    // clearing the inline style would just fall back to that rule.
+    ab.style.display=canAuto?"inline-flex":"none";
     ab.className="btn"+(auto?" auto-on":"");
     ab.textContent=auto?"⚡ Auto Mode: ON":"⚡ Auto Mode";
     $("#auto-banner").style.display=(canAuto&&auto)?"block":"none";
