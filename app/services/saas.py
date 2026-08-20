@@ -50,6 +50,26 @@ from app.utils import utils
 # also removes the Download button from that job's card.
 DELETE_AFTER_PUBLISH = os.getenv("MPT_DELETE_AFTER_PUBLISH", "").strip().lower() in ("1", "true", "yes")
 
+# Auto Mode belongs where rendering is free: the machine running the engine
+# in-process. On Cloud Run the service only dispatches jobs, so every
+# auto-generated video costs money - the button is hidden there and the
+# endpoint refuses to turn it on. MPT_ALLOW_AUTO_MODE overrides either way.
+_allow_auto = os.getenv("MPT_ALLOW_AUTO_MODE", "").strip().lower()
+
+# Even locally, generation needs a ceiling. The engine loop generates whenever
+# the queue is empty, so without this it produces videos continuously for as
+# long as it runs - and auto-publishes every one of them.
+AUTO_DAILY_LIMIT = max(0, int(os.getenv("MPT_AUTO_DAILY_LIMIT", "3")))
+_auto_quota = {"day": "", "count": 0}
+
+
+def auto_mode_available() -> bool:
+    if _allow_auto in ("1", "true", "yes"):
+        return True
+    if _allow_auto in ("0", "false", "no"):
+        return False
+    return not render_dispatch.enabled()
+
 STATUS_PENDING = "pending"
 STATUS_PROCESSING = "processing"
 STATUS_DONE = "done"
@@ -721,6 +741,7 @@ class Engine:
             "paused": state["paused"],
             "auto_killed": state["auto_killed"],
             "workers": self.NUM_WORKERS,
+            "auto_available": auto_mode_available(),
             "processing_count": len(processing),
             "processing_jobs": [
                 {"job_id": j.get("id"), "uid": j.get("uid"), "title": j.get("title", "")} for j in processing
@@ -772,6 +793,14 @@ class Engine:
             self._wake.clear()
 
     def _auto_generate(self, worker_id: str) -> bool:
+        if not auto_mode_available():
+            return False
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if _auto_quota["day"] != today:
+            _auto_quota.update(day=today, count=0)
+        if _auto_quota["count"] >= AUTO_DAILY_LIMIT:
+            return False
+
         user = firestore_db.claim_next_auto_mode_user(worker_id)
         if not user:
             return False
@@ -779,7 +808,11 @@ class Engine:
         try:
             with _user_config_scope(uid) as profile:
                 job = generate_viral_job(uid, profile)
-            logger.success(f"auto-mode created job {job['id']} for {uid} - {job['title']}")
+            _auto_quota["count"] += 1
+            logger.success(
+                f"auto-mode created job {job['id']} for {uid} - {job['title']} "
+                f"({_auto_quota['count']}/{AUTO_DAILY_LIMIT} today)"
+            )
             return True
         except Exception as e:  # noqa: BLE001 - keep the loop alive on any failure
             logger.error(f"auto-mode generation failed for {uid}: {e}")

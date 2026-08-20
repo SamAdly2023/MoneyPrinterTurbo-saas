@@ -791,10 +791,15 @@ async function refresh(){
     $("#engine-sub").textContent=paused?"queue is on hold":(auto?"your auto-mode is on":"processing queue");
     $("#engine-toggle").textContent=paused?"Resume engine":"Pause engine";
     // auto-mode button + banner (per-user)
+    // Auto Mode only exists where rendering is free (the local app). On the
+    // hosted site the server reports auto_available:false and the button is
+    // hidden rather than shown-but-broken.
+    const canAuto=!(d.engine&&d.engine.auto_available===false);
     const ab=$("#auto-btn");
+    ab.style.display=canAuto?"":"none";
     ab.className="btn"+(auto?" auto-on":"");
     ab.textContent=auto?"⚡ Auto Mode: ON":"⚡ Auto Mode";
-    $("#auto-banner").style.display=auto?"block":"none";
+    $("#auto-banner").style.display=(canAuto&&auto)?"block":"none";
     // jobs list (only re-render if changed, so videos don't reload)
     const sig=JSON.stringify(d.jobs.map(j=>[j.id,j.status,j.progress,(j.videos||[]).length,j.publish||0]))+socialSig;
     if(sig!==lastSig){

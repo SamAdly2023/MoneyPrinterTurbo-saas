@@ -425,6 +425,12 @@ def engine_status(request: Request):
 @router.post("/saas/engine/auto/start", summary="Enable this user's auto-mode")
 def engine_auto_start(request: Request):
     uid = _uid(request)
+    if not saas.auto_mode_available():
+        # The UI hides the button here, but the endpoint is public - don't
+        # rely on the client to enforce where generation is allowed.
+        return utils.get_response(
+            400, {}, "Auto Mode runs on the local app, not on the hosted site."
+        )
     profile = firestore_db.get_user_profile(uid)
     profile["auto_mode"] = True
     firestore_db.save_user_profile(uid, profile)
