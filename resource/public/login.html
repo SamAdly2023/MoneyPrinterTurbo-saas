@@ -88,7 +88,16 @@ firebase.initializeApp({
 });
 
 const $ = s => document.querySelector(s);
-let signUpMode = new URLSearchParams(location.search).get("signup") === "1";
+const params = new URLSearchParams(location.search);
+// Accounts are invitation-only. The token travels with the sign-up request
+// and the server validates it against the invited address - this is a UI
+// convenience, not the gate itself.
+const inviteToken = params.get("invite") || "";
+let signUpMode = inviteToken !== "" || params.get("signup") === "1";
+if (inviteToken) {
+  $("#switch-link").style.display = "none";
+  $("#switch-text").textContent = "You have been invited - create your account below.";
+}
 if (signUpMode) {
   $("#mode-sub").textContent = "Create your account";
   $("#submit-btn").textContent = "Sign up";
@@ -108,7 +117,7 @@ async function completeSignIn(user){
   const r = await fetch("/api/v1/auth/session", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({id_token: idToken}),
+    body: JSON.stringify({id_token: idToken, invite: inviteToken}),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || (j.status && j.status >= 400)) {

@@ -49,6 +49,20 @@ router = new_router()
 _CLIP_UPLOADS: dict = {}
 
 
+def _blocked(request: Request, flag: str, label: str):
+    """403 when an admin has switched this capability off for this account.
+
+    The flag is re-read from the database on every request (see
+    auth.get_current_user), so revoking it takes effect immediately - an
+    open dashboard cannot keep queueing work on a stale session.
+    """
+    if not request.state.user.get(flag, True):
+        return utils.get_response(
+            403, message=f"{label} has been disabled for this account. Contact support."
+        )
+    return None
+
+
 def _uid(request: Request) -> str:
     return request.state.user["uid"]
 
@@ -365,6 +379,8 @@ def list_jobs(request: Request):
 
 @router.post("/saas/jobs", summary="Save a script and add it to the queue")
 def create_job(request: Request, body: JobBody):
+    if (denied := _blocked(request, "can_render", "Video rendering")) is not None:
+        return denied
     if not body.video_subject.strip():
         return utils.get_response(400, message="video_subject is required")
     uid = _uid(request)
@@ -402,6 +418,8 @@ def delete_job(request: Request, job_id: str = Path(...)):
 
 @router.post("/saas/jobs/{job_id}/retry", summary="Re-queue a job")
 def retry_job(request: Request, job_id: str = Path(...)):
+    if (denied := _blocked(request, "can_render", "Video rendering")) is not None:
+        return denied
     uid = _uid(request)
     job = saas.store.get(uid, job_id)
     if not job:
@@ -459,6 +477,8 @@ class GenerateOneBody(BaseModel):
 
 @router.post("/saas/generate-one", summary="Generate a single AI video right now, without turning on Auto Mode")
 def generate_one(request: Request, body: GenerateOneBody = None):
+    if (denied := _blocked(request, "can_render", "Video rendering")) is not None:
+        return denied
     uid = _uid(request)
     profile = firestore_db.get_user_profile(uid)
     video_source = (body.video_source if body else "") or ""
@@ -808,6 +828,8 @@ class ClipQueueBody(BaseModel):
 
 @router.post("/saas/clips/jobs", summary="Queue render jobs for the chosen highlight segments")
 def queue_clip_jobs(request: Request, body: ClipQueueBody):
+    if (denied := _blocked(request, "can_clip", "Clipping")) is not None:
+        return denied
     uid = _uid(request)
     info = _CLIP_UPLOADS.get(body.upload_id)
     if not info or info["uid"] != uid:

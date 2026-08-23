@@ -7,6 +7,7 @@ and control-plane actions, not just page views.
 """
 
 import os
+import secrets
 from typing import Optional
 
 from fastapi import File, Path, Request, UploadFile
@@ -213,6 +214,71 @@ def demote_user(request: Request, uid: str = Path(...)):
         return utils.get_response(400, message="this account is a permanent owner and cannot be demoted")
     firestore_db.set_user_admin(uid, False)
     return utils.get_response(200, {"uid": uid, "is_admin": False})
+
+
+# --------------------------------------------------------------------------- #
+# Invites - signup is invitation-only, so an account starts here
+# --------------------------------------------------------------------------- #
+class InviteBody(BaseModel):
+    email: str
+
+
+@router.post("/admin/invites", summary="Create a personal sign-up link for one email")
+def create_invite(request: Request, body: InviteBody):
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    email = (body.email or "").strip().lower()
+    if "@" not in email or " " in email:
+        return utils.get_response(400, message="enter a valid email address")
+
+    # Bound to this address and single-use: the link is sent over WhatsApp,
+    # so it must be worthless to anyone who forwards it on.
+    token = secrets.token_urlsafe(24)
+    firestore_db.create_invite(token, email, request.state.user["uid"])
+    base = (firestore_db.get_global_settings().get("publish_base_url") or "").rstrip("/")
+    return utils.get_response(200, {
+        "token": token,
+        "email": email,
+        "link": f"{base}/login?invite={token}",
+    })
+
+
+@router.get("/admin/invites", summary="List invites and whether they were used")
+def list_invites(request: Request):
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    base = (firestore_db.get_global_settings().get("publish_base_url") or "").rstrip("/")
+    invites = firestore_db.list_invites()
+    for inv in invites:
+        inv["link"] = f"{base}/login?invite={inv.get('token','')}"
+    return utils.get_response(200, {"invites": invites})
+
+
+@router.delete("/admin/invites/{token}", summary="Revoke an unused invite")
+def revoke_invite(request: Request, token: str = Path(...)):
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    firestore_db.delete_invite(token)
+    return utils.get_response(200, {"token": token})
+
+
+# --------------------------------------------------------------------------- #
+# Per-user capability switches
+# --------------------------------------------------------------------------- #
+class FeaturesBody(BaseModel):
+    can_render: Optional[bool] = None
+    can_clip: Optional[bool] = None
+
+
+@router.post("/admin/users/{uid}/features", summary="Turn rendering or clipping on/off for one user")
+def set_user_features(request: Request, body: FeaturesBody, uid: str = Path(...)):
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    flags = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not flags:
+        return utils.get_response(400, message="nothing to change")
+    firestore_db.set_user_features(uid, **flags)
+    return utils.get_response(200, {"uid": uid, **flags})
 
 
 @router.post("/admin/users/{uid}/disable", summary="Disable a user's account")

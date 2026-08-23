@@ -79,4 +79,15 @@ def get_current_user(request: Request) -> dict | None:
         return None
     email = (user.get("email") or "").lower()
     is_owner = email in ADMIN_EMAILS
-    return {"uid": uid, "email": email, "is_admin": is_owner or bool(user.get("is_admin")), "is_owner": is_owner}
+    return {
+        "uid": uid,
+        "email": email,
+        "is_admin": is_owner or bool(user.get("is_admin")),
+        "is_owner": is_owner,
+        # Per-user capability switches, re-derived per request like is_admin
+        # so an admin revoking them takes effect immediately rather than at
+        # the user's next login. Absent means allowed, so accounts that
+        # predate the feature keep working untouched.
+        "can_render": bool(user.get("can_render", True)),
+        "can_clip": bool(user.get("can_clip", True)),
+    }

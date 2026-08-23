@@ -393,6 +393,68 @@ def list_processing_jobs() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Invites (signup is invitation-only)
+# ---------------------------------------------------------------------------
+def create_invite(token: str, email: str, created_by: str) -> dict:
+    doc = {
+        "token": token,
+        "email": (email or "").strip().lower(),
+        "created_by": created_by,
+        "created_at": _now(),
+        "used_at": None,
+        "used_by_uid": None,
+    }
+    db.collection("invites").document(token).set(doc)
+    return doc
+
+
+def get_invite(token: str) -> dict | None:
+    snap = db.collection("invites").document(token).get()
+    return snap.to_dict() if snap.exists else None
+
+
+def claim_invite(token: str, email: str, uid: str) -> bool:
+    """Single-use, and only by the address it was issued to.
+
+    The read and the mark happen in one transaction so the same link opened
+    twice at once cannot create two accounts.
+    """
+    email = (email or "").strip().lower()
+    ref = db.collection("invites").document(token)
+
+    @firestore.transactional
+    def _claim(transaction):
+        snap = ref.get(transaction=transaction)
+        data = snap.to_dict() if snap.exists else None
+        if not data or data.get("used_at") or (data.get("email") or "") != email:
+            return False
+        transaction.update(ref, {"used_at": _now(), "used_by_uid": uid})
+        return True
+
+    return _claim(db.transaction())
+
+
+def list_invites() -> list[dict]:
+    out = []
+    for snap in db.collection("invites").stream():
+        out.append(snap.to_dict())
+    out.sort(key=lambda i: i.get("created_at") or "", reverse=True)
+    return out
+
+
+def delete_invite(token: str) -> None:
+    db.collection("invites").document(token).delete()
+
+
+def set_user_features(uid: str, **flags) -> None:
+    """Per-user capability switches (can_render, can_clip). Absent means
+    allowed, so existing accounts keep working without a migration."""
+    db.collection("users").document(uid).set(
+        {k: bool(v) for k, v in flags.items()}, merge=True
+    )
+
+
+# ---------------------------------------------------------------------------
 # Visitor analytics (public marketing-page traffic - admin-only to view)
 # ---------------------------------------------------------------------------
 def get_visitor_session(session_id: str) -> dict | None:

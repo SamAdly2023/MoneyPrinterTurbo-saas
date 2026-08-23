@@ -122,6 +122,14 @@ def _init_schema(conn):
             key  TEXT PRIMARY KEY,
             data TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS invites (
+            token       TEXT PRIMARY KEY,
+            email       TEXT,
+            created_by  TEXT,
+            created_at  TEXT,
+            used_at     TEXT,
+            used_by_uid TEXT
+        );
         CREATE TABLE IF NOT EXISTS visitor_sessions (
             session_id TEXT PRIMARY KEY,
             last_seen  TEXT,
@@ -524,6 +532,88 @@ def list_processing_jobs() -> list[dict]:
     except Exception as e:  # noqa: BLE001 - polled constantly; never break status
         logger.warning(f"list_processing_jobs failed: {e}")
     return out
+
+
+# ---------------------------------------------------------------------------
+# Invites (signup is invitation-only)
+# ---------------------------------------------------------------------------
+def create_invite(token: str, email: str, created_by: str) -> dict:
+    doc = {
+        "token": token,
+        "email": (email or "").strip().lower(),
+        "created_by": created_by,
+        "created_at": _now(),
+        "used_at": None,
+        "used_by_uid": None,
+    }
+    with _lock:
+        conn = _connect()
+        conn.execute(
+            "INSERT INTO invites(token, email, created_by, created_at, used_at, used_by_uid) "
+            "VALUES(?,?,?,?,NULL,NULL)",
+            (doc["token"], doc["email"], doc["created_by"], doc["created_at"]),
+        )
+        conn.commit()
+    return doc
+
+
+def get_invite(token: str) -> dict | None:
+    row = _connect().execute(
+        "SELECT token, email, created_by, created_at, used_at, used_by_uid "
+        "FROM invites WHERE token=?", (token,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def claim_invite(token: str, email: str, uid: str) -> bool:
+    """Single-use, and only by the address it was issued to.
+
+    Both checks and the write happen inside one BEGIN IMMEDIATE, so two
+    simultaneous sign-ups with the same link cannot both succeed.
+    """
+    email = (email or "").strip().lower()
+    with _lock:
+        conn = _connect()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT email, used_at FROM invites WHERE token=?", (token,)
+            ).fetchone()
+            if not row or row["used_at"] or row["email"] != email:
+                conn.rollback()
+                return False
+            conn.execute(
+                "UPDATE invites SET used_at=?, used_by_uid=? WHERE token=?",
+                (_now(), uid, token),
+            )
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def list_invites() -> list[dict]:
+    return [
+        dict(row)
+        for row in _connect().execute(
+            "SELECT token, email, created_by, created_at, used_at, used_by_uid "
+            "FROM invites ORDER BY created_at DESC"
+        )
+    ]
+
+
+def delete_invite(token: str) -> None:
+    with _lock:
+        conn = _connect()
+        conn.execute("DELETE FROM invites WHERE token=?", (token,))
+        conn.commit()
+
+
+def set_user_features(uid: str, **flags) -> None:
+    """Per-user capability switches (can_render, can_clip). Absent means
+    allowed, so existing accounts keep working without a migration."""
+    _update_user(uid, {k: bool(v) for k, v in flags.items()})
 
 
 # ---------------------------------------------------------------------------

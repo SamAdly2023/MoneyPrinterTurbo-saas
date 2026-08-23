@@ -146,13 +146,33 @@
     </div>
 
     <div class="panel">
+      <h3>Invites</h3>
+      <p class="hint">Signup is invitation-only. Generate a link for the email the person gave you on WhatsApp, then send them the link - it only works for that address, and only once.</p>
+      <div class="row" style="margin-bottom:14px;gap:8px">
+        <input class="search" id="invite-email" placeholder="their@email.com" style="max-width:320px" />
+        <button class="btn" id="invite-create">Generate link</button>
+      </div>
+      <div id="invite-result" style="display:none;margin-bottom:14px">
+        <div class="row" style="gap:8px">
+          <input class="search" id="invite-link" readonly style="flex:1" />
+          <button class="btn" id="invite-copy">Copy</button>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>Email</th><th>Created</th><th>Status</th><th></th></tr></thead>
+        <tbody id="invites-body"></tbody>
+      </table>
+      <div class="empty" id="invites-empty" style="display:none">No invites yet.</div>
+    </div>
+
+    <div class="panel">
       <h3>Users</h3>
       <p class="hint">Disabling a user immediately revokes their access, even on an existing session.</p>
       <div class="row" style="margin-bottom:14px">
         <input class="search" id="user-search" placeholder="Search by email…" />
       </div>
       <table>
-        <thead><tr><th>Email</th><th>Provider</th><th>Signed up</th><th>Jobs</th><th>Auto-mode</th><th>Role</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Email</th><th>Provider</th><th>Signed up</th><th>Jobs</th><th>Auto-mode</th><th>Rendering</th><th>Clipping</th><th>Role</th><th>Status</th><th></th></tr></thead>
         <tbody id="users-body"></tbody>
       </table>
       <div class="empty" id="users-empty" style="display:none">No users yet.</div>
@@ -295,12 +315,71 @@ function renderUsers(){
       <td class="muted">${fmtDate(u.created_at)}</td>
       <td>${u.job_count||0}</td>
       <td><span class="pill ${u.profile&&u.profile.auto_mode?"on":"off"}">${u.profile&&u.profile.auto_mode?"ON":"off"}</span></td>
+      <td><button class="btn sm" onclick="toggleFeature('${u.uid}','can_render',${u.can_render===false})">${u.can_render===false?"OFF":"ON"}</button></td>
+      <td><button class="btn sm" onclick="toggleFeature('${u.uid}','can_clip',${u.can_clip===false})">${u.can_clip===false?"OFF":"ON"}</button></td>
       <td><span class="pill ${roleCls}">${roleLabel}</span></td>
       <td><span class="pill ${u.is_disabled?"failed":"done"}">${u.is_disabled?"Disabled":"Active"}</span></td>
       <td class="row" style="gap:6px;flex-wrap:nowrap">${roleBtn}<button class="btn sm ${u.is_disabled?"":"danger"}" onclick="toggleUser('${u.uid}',${!u.is_disabled})">${u.is_disabled?"Enable":"Disable"}</button></td>
     </tr>`;
   }).join("");
 }
+
+window.toggleFeature=async(uid,flag,enable)=>{
+  try{
+    await api(`/users/${uid}/features`,{method:"POST",body:JSON.stringify({[flag]:enable})});
+    toast((flag==="can_render"?"Rendering ":"Clipping ")+(enable?"enabled":"disabled"));
+    await loadUsers();
+  }catch(e){toast(e.message,"err")}
+};
+
+async function loadInvites(){
+  try{
+    const d=await api("/invites");
+    const rows=d.invites||[];
+    $("#invites-empty").style.display=rows.length?"none":"block";
+    $("#invites-body").innerHTML=rows.map(i=>`
+      <tr>
+        <td>${esc(i.email||"")}</td>
+        <td class="muted">${fmtDate(i.created_at)}</td>
+        <td><span class="pill ${i.used_at?"done":"off"}">${i.used_at?"Used":"Unused"}</span></td>
+        <td class="row" style="gap:6px;flex-wrap:nowrap">
+          ${i.used_at?"":`<button class="btn sm" onclick="copyInvite('${esc(i.link||"")}')">Copy link</button>
+          <button class="btn sm danger" onclick="revokeInvite('${i.token}')">Revoke</button>`}
+        </td>
+      </tr>`).join("");
+  }catch(e){/* panel is optional - never break the dashboard over it */}
+}
+
+window.copyInvite=link=>{navigator.clipboard.writeText(link).then(()=>toast("Link copied"));};
+
+window.revokeInvite=async token=>{
+  if(!confirm("Revoke this invite? The link stops working.")) return;
+  try{
+    await api(`/invites/${token}`,{method:"DELETE"});
+    toast("Invite revoked");
+    await loadInvites();
+  }catch(e){toast(e.message,"err")}
+};
+
+document.addEventListener("DOMContentLoaded",()=>{
+  const btn=document.getElementById("invite-create");
+  if(!btn) return;
+  btn.onclick=async()=>{
+    const email=($("#invite-email").value||"").trim();
+    if(!email) return toast("Enter an email first","err");
+    btn.disabled=true;
+    try{
+      const d=await api("/invites",{method:"POST",body:JSON.stringify({email})});
+      $("#invite-link").value=d.link;
+      $("#invite-result").style.display="block";
+      $("#invite-email").value="";
+      toast("Invite created - copy the link and send it on WhatsApp");
+      await loadInvites();
+    }catch(e){toast(e.message,"err")}finally{btn.disabled=false}
+  };
+  $("#invite-copy").onclick=()=>copyInvite($("#invite-link").value);
+  loadInvites();
+});
 
 window.toggleUser=async(uid,disable)=>{
   if(disable && !confirm("Disable this user? They will lose access immediately.")) return;

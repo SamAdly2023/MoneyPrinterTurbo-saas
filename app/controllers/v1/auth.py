@@ -32,6 +32,7 @@ def _send_signup_emails(user_email: str, provider: str):
 
 class SessionBody(BaseModel):
     id_token: str
+    invite: str = ""
 
 
 @router.post("/auth/session", summary="Exchange a Firebase ID token for a session cookie")
@@ -43,6 +44,18 @@ def create_session(body: SessionBody):
         return utils.get_response(401, message="invalid or expired sign-in token")
 
     uid, user_email, provider = decoded["uid"], decoded["email"], decoded["provider"]
+
+    # Signup is invitation-only. Check *before* creating anything, so a
+    # rejected sign-up leaves no half-made account behind - and so returning
+    # users, who already have a record, never need an invite again.
+    if firestore_db.get_user(uid) is None:
+        if not firestore_db.claim_invite(body.invite or "", user_email, uid):
+            logger.warning(f"blocked uninvited signup: {user_email}")
+            return utils.get_response(
+                403,
+                message="Access is by invitation only. Request access and we will send you a personal sign-up link.",
+            )
+
     user, is_new = firestore_db.create_user_if_missing(uid, user_email, provider)
     if user.get("is_disabled"):
         return utils.get_response(403, message="this account has been disabled")

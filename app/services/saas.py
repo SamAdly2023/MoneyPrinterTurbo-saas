@@ -805,6 +805,12 @@ class Engine:
         if not user:
             return False
         uid = user["uid"]
+        if not user.get("can_render", True):
+            # Rendering switched off for this account by an admin. The claim
+            # already rotated them to the back of the queue, so the next round
+            # moves on to someone else rather than sticking here.
+            logger.info(f"auto-mode skipped for {uid}: rendering is disabled")
+            return False
         try:
             with _user_config_scope(uid) as profile:
                 job = generate_viral_job(uid, profile)
