@@ -658,9 +658,28 @@ def linkedin_callback(request: Request, code: str = "", error: str = ""):
         return _popup_close_html(f"LinkedIn connection failed: {e}", ok=False)
 
 
+class BilibiliCookiesBody(BaseModel):
+    cookies: str
+
+
+@router.post("/saas/bilibili/credentials", summary="Save Bilibili cookies (local app only)")
+def bilibili_credentials(request: Request, body: BilibiliCookiesBody):
+    uid = _uid(request)
+    if not publish.bilibili_available():
+        return utils.get_response(
+            400,
+            message="Bilibili publishing only runs on the local app, and needs bilibili-api-python installed.",
+        )
+    try:
+        publish.bilibili_save_cookies(uid, body.cookies)
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    return utils.get_response(200, publish.status(uid))
+
+
 @router.post("/saas/{platform}/disconnect", summary="Disconnect a platform")
 def social_disconnect(request: Request, platform: str = Path(...)):
-    if platform not in ("youtube", "tiktok", "facebook", "linkedin"):
+    if platform not in ("youtube", "tiktok", "facebook", "linkedin", "bilibili"):
         return utils.get_response(400, message="unknown platform")
     uid = _uid(request)
     publish.disconnect(uid, platform)

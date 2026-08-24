@@ -779,12 +779,144 @@ def linkedin_status(uid: str) -> dict:
     }
 
 
+# --------------------------------------------------------------------------- #
+# Bilibili (local app only)
+# --------------------------------------------------------------------------- #
+# Bilibili has no upload API available to us: their open platform is aimed at
+# Chinese institutions and needs qualifications we cannot supply. What works
+# instead is replaying a logged-in browser session's cookies, which is what
+# bilibili-api-python does. That is against Bilibili's terms and can get an
+# account restricted, so it is deliberately confined to the local app:
+#
+#   - the dependency is not in requirements.txt, so the Cloud Run image has
+#     no way to run it even if the code were reached
+#   - bilibili_available() additionally refuses whenever rendering dispatches
+#     to Cloud Run, i.e. on the hosted site
+#
+# Nobody's client account can be exposed by this; only the machine the owner
+# runs it on. Install locally with:  pip install bilibili-api-python
+#
+# Default partition 21 is 日常 (Daily), the general-purpose category. Override
+# per-deployment with the bilibili_tid setting.
+BILIBILI_DEFAULT_TID = 21
+
+
+def bilibili_available() -> bool:
+    from app.services import render_dispatch
+
+    if render_dispatch.enabled():
+        return False
+    try:
+        import bilibili_api  # noqa: F401
+    except Exception:  # noqa: BLE001 - not installed is the normal case
+        return False
+    return True
+
+
+def bilibili_save_cookies(uid: str, cookie_blob: str) -> dict:
+    """Store the three cookies Bilibili needs, parsed out of a pasted header.
+
+    Asking for a whole `Cookie:` header rather than three separate fields is
+    deliberate - copying one line out of DevTools is far less error-prone than
+    hunting for three values by name.
+    """
+    wanted = {"SESSDATA": "", "bili_jct": "", "DedeUserID": "", "buvid3": ""}
+    for part in (cookie_blob or "").replace("\n", ";").split(";"):
+        if "=" not in part:
+            continue
+        key, _, value = part.partition("=")
+        key, value = key.strip(), value.strip()
+        for name in wanted:
+            if key.lower() == name.lower():
+                wanted[name] = value
+
+    missing = [k for k in ("SESSDATA", "bili_jct", "DedeUserID") if not wanted[k]]
+    if missing:
+        raise ValueError(
+            "These cookies were missing from what you pasted: " + ", ".join(missing)
+            + ". Copy the whole Cookie header from a logged-in bilibili.com request."
+        )
+
+    info = {
+        "sessdata": wanted["SESSDATA"],
+        "bili_jct": wanted["bili_jct"],
+        "dedeuserid": wanted["DedeUserID"],
+        "buvid3": wanted["buvid3"],
+        "saved_at": time.time(),
+    }
+    firestore_db.save_user_social(uid, "bilibili", info)
+    logger.success("Bilibili cookies saved for " + uid)
+    return info
+
+
+def bilibili_upload(uid: str, video_path: str, title: str, description: str, tags: list) -> dict:
+    if not bilibili_available():
+        raise RuntimeError(
+            "Bilibili publishing only runs on the local app, and needs "
+            "bilibili-api-python installed."
+        )
+    info = firestore_db.get_user_social(uid).get("bilibili", {})
+    if not info.get("sessdata"):
+        raise ValueError("Bilibili is not connected - paste your cookies in the dashboard")
+
+    import asyncio
+
+    from bilibili_api import Credential
+    from bilibili_api import video_uploader as vu
+
+    credential = Credential(
+        sessdata=info.get("sessdata", ""),
+        bili_jct=info.get("bili_jct", ""),
+        dedeuserid=info.get("dedeuserid", ""),
+        buvid3=info.get("buvid3", "") or None,
+    )
+
+    # Bilibili caps the title at 80 characters and rejects the submission
+    # outright if it is longer, rather than truncating for you.
+    safe_title = (title or "Video")[:80]
+    tag_list = [t for t in (tags or []) if t][:10] or ["shorts"]
+
+    meta = vu.VideoMeta(
+        tid=int(_global().get("bilibili_tid") or BILIBILI_DEFAULT_TID),
+        title=safe_title,
+        desc=(description or "")[:2000],
+        cover="",
+        tags=tag_list,
+        original=True,
+        no_reprint=True,
+    )
+    page = vu.VideoUploaderPage(path=video_path, title=safe_title, description=(description or "")[:250])
+    uploader = vu.VideoUploader(pages=[page], meta=meta, credential=credential)
+
+    # start() is async and the publish pipeline is synchronous, so give it its
+    # own loop rather than assuming one is already running.
+    result = asyncio.run(uploader.start())
+
+    bvid = (result or {}).get("bvid", "")
+    logger.success("uploaded to Bilibili: " + (bvid or str(result)))
+    return {
+        "success": True,
+        "id": bvid or str((result or {}).get("aid", "")),
+        "url": ("https://www.bilibili.com/video/" + bvid) if bvid else "",
+    }
+
+
+def bilibili_status(uid: str) -> dict:
+    info = firestore_db.get_user_social(uid).get("bilibili", {})
+    return {
+        "connected": bool(info.get("sessdata")),
+        "available": bilibili_available(),
+        "uid": info.get("dedeuserid", ""),
+    }
+
+
 def status(uid: str) -> dict:
     return {
         "youtube": youtube_status(uid),
         "tiktok": tiktok_status(uid),
         "facebook": facebook_status(uid),
         "linkedin": linkedin_status(uid),
+        "bilibili": bilibili_status(uid),
     }
 
 
@@ -826,6 +958,12 @@ def publish_video(uid: str, video_path: str, meta: dict, platforms: list) -> dic
         except Exception as e:  # noqa: BLE001
             logger.error(f"facebook publish failed: {e}")
             results["facebook"] = {"success": False, "error": str(e)}
+    if "bilibili" in platforms:
+        try:
+            results["bilibili"] = bilibili_upload(uid, video_path, title, description, tags)
+        except Exception as e:  # noqa: BLE001
+            logger.error("bilibili publish failed: {}".format(e))
+            results["bilibili"] = {"success": False, "error": str(e)}
     if "linkedin" in platforms:
         try:
             results["linkedin"] = linkedin_upload(uid, video_path, title, description)

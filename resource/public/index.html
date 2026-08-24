@@ -84,6 +84,8 @@
   #tt-btn.connected{border-color:#155e63;color:#5fe3ee;background:rgba(34,211,238,.10)}
   #fb-btn.connected{border-color:#1d3a63;color:#7db1ff;background:rgba(59,130,246,.10)}
   #li-btn.connected{border-color:#14456b;color:#70b5f9;background:rgba(10,102,194,.12)}
+  #bili-btn{display:none}
+  #bili-btn.connected{border-color:#5c2545;color:#ff9ec7;background:rgba(251,114,153,.10)}
   .pub-result{margin-top:10px;font-size:12.5px;display:flex;flex-direction:column;gap:5px}
   .pub-result .ok{color:#5ee08a} .pub-result .no{color:#ff9d9d}
 
@@ -218,6 +220,7 @@
           <button class="btn" id="tt-btn" title="Connect your TikTok account">◆ TikTok</button>
           <button class="btn" id="fb-btn" title="Connect your Facebook Page (and linked Instagram)">📘 Facebook</button>
           <button class="btn" id="li-btn" title="Connect your LinkedIn profile">in LinkedIn</button>
+          <button class="btn" id="bili-btn" title="Bilibili - local app only, uses your browser cookies">📺 Bilibili</button>
           <button class="btn" id="auto-btn" title="Let AI invent viral Shorts and keep rendering them non-stop">⚡ Auto Mode</button>
           <select id="gen-one-aspect" title="Aspect ratio for this video" style="width:auto;padding:9px 11px">
             <option value="9:16">Portrait 9:16</option>
@@ -413,6 +416,7 @@
             <label class="switch" style="font-weight:500"><input type="checkbox" id="p-pub-tt" /> TikTok (drafts)</label>
             <label class="switch" style="font-weight:500"><input type="checkbox" id="p-pub-fb" /> Facebook Page</label>
           <label class="switch" style="font-weight:500"><input type="checkbox" id="p-pub-li" /> LinkedIn</label>
+          <label class="switch" style="font-weight:500" id="p-pub-bili-wrap"><input type="checkbox" id="p-pub-bili" /> Bilibili <span class="desc">(local app only)</span></label>
             <label class="switch" style="font-weight:500"><input type="checkbox" id="p-pub-ig" /> Instagram <span class="desc">(needs the hosted site - Meta fetches the video by URL)</span></label>
           </div>
         </div>
@@ -701,7 +705,7 @@ async function refreshSocial(){
   try{
     const d=await api("/social/status");
     social=d;
-    const yt=$("#yt-btn"),tt=$("#tt-btn"),fb=$("#fb-btn"),li=$("#li-btn");
+    const yt=$("#yt-btn"),tt=$("#tt-btn"),fb=$("#fb-btn"),li=$("#li-btn"),bili=$("#bili-btn");
     yt.className="btn"+(d.youtube.connected?" connected":"");
     yt.textContent=d.youtube.connected?("▶ YouTube ✓"+(d.youtube.channel?" "+d.youtube.channel:"")):"▶ YouTube";
     tt.className="btn"+(d.tiktok.connected?" connected":"");
@@ -713,7 +717,15 @@ async function refreshSocial(){
     // An expired member token still looks "connected" in the database, so say
     // so on the button rather than letting a publish fail silently later.
     li.textContent=liOn?("in LinkedIn ✓"+(d.linkedin.name?" "+d.linkedin.name:"")):(d.linkedin&&d.linkedin.expired?"in LinkedIn (expired)":"in LinkedIn");
-    const ns=JSON.stringify([d.youtube.connected,d.youtube.channel,d.tiktok.connected,d.facebook.connected,d.facebook.instagram,liOn]);
+    // Bilibili has no usable public API, so it runs on pasted cookies and only
+    // on the local app. The server decides; hide the button everywhere else.
+    const biliOK=d.bilibili&&d.bilibili.available;
+    bili.style.display=biliOK?"inline-flex":"none";
+    if(biliOK){
+      bili.className="btn"+(d.bilibili.connected?" connected":"");
+      bili.textContent=d.bilibili.connected?"📺 Bilibili ✓":"📺 Bilibili";
+    }
+    const ns=JSON.stringify([d.youtube.connected,d.youtube.channel,d.tiktok.connected,d.facebook.connected,d.facebook.instagram,liOn,biliOK&&d.bilibili.connected]);
     if(ns!==socialSig){socialSig=ns;lastSig="";}   // refresh job cards so publish buttons update
   }catch(e){}
 }
@@ -900,6 +912,21 @@ $("#fb-btn").onclick=()=>{
 $("#li-btn").onclick=()=>{
   if(social.linkedin&&social.linkedin.connected){ if(confirm("Disconnect LinkedIn?"))api("/linkedin/disconnect",{method:"POST"}).then(()=>{refreshSocial();toast("LinkedIn disconnected")}); }
   else connectPlatform("linkedin");
+};
+$("#bili-btn").onclick=async()=>{
+  if(social.bilibili&&social.bilibili.connected){
+    if(confirm("Disconnect Bilibili?")) api("/bilibili/disconnect",{method:"POST"}).then(()=>{refreshSocial();toast("Bilibili disconnected")});
+    return;
+  }
+  // Cookies rather than OAuth: Bilibili has no upload API open to us. Asking
+  // for the whole Cookie header beats hunting for three values by name.
+  const blob=prompt("Open bilibili.com while logged in, open DevTools > Network, copy the whole Cookie header from any request, and paste it here:");
+  if(!blob) return;
+  try{
+    await api("/bilibili/credentials",{method:"POST",body:JSON.stringify({cookies:blob})});
+    await refreshSocial();
+    toast("Bilibili connected");
+  }catch(e){toast(e.message,"err")}
 };
 window.addEventListener("message",e=>{ if(e.data==="mpt-social-updated"){refreshSocial();toast("Connection updated");} });
 window.publishJob=async(id,platforms)=>{
@@ -1172,6 +1199,9 @@ async function loadProfile(){
     $("#p-pub-tt").checked=plats.includes("tiktok");
     $("#p-pub-fb").checked=plats.includes("facebook");
     $("#p-pub-li").checked=plats.includes("linkedin");
+    $("#p-pub-bili").checked=plats.includes("bilibili");
+    const bw=$("#p-pub-bili-wrap");
+    if(bw) bw.style.display=(social.bilibili&&social.bilibili.available)?"":"none";
     $("#p-pub-ig").checked=plats.includes("instagram");
     $("#p-yt-privacy").value=p.youtube_privacy||"public";
     $("#p-aspect").value=p.video_aspect||"";
@@ -1323,7 +1353,7 @@ $("#save-profile").onclick=async()=>{
     business_address:$("#p-address").value.trim(),
     business_bio:$("#p-bio").value.trim(),
     auto_publish:$("#p-autopub").checked,
-    auto_publish_platforms:[...($("#p-pub-yt").checked?["youtube"]:[]),...($("#p-pub-tt").checked?["tiktok"]:[]),...($("#p-pub-fb").checked?["facebook"]:[]),...($("#p-pub-li").checked?["linkedin"]:[]),...($("#p-pub-ig").checked?["instagram"]:[])],
+    auto_publish_platforms:[...($("#p-pub-yt").checked?["youtube"]:[]),...($("#p-pub-tt").checked?["tiktok"]:[]),...($("#p-pub-fb").checked?["facebook"]:[]),...($("#p-pub-li").checked?["linkedin"]:[]),...($("#p-pub-bili").checked?["bilibili"]:[]),...($("#p-pub-ig").checked?["instagram"]:[])],
     youtube_privacy:$("#p-yt-privacy").value,
     video_aspect:$("#p-aspect").value,
     subtitle_position:$("#p-subpos").value,
