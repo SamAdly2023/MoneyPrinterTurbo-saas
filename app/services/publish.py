@@ -39,6 +39,15 @@ TT_SCOPE = "user.info.basic,video.upload"
 FB_SCOPE = "pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish"
 META_API = "https://graph.facebook.com/v21.0"
 
+# LinkedIn posts as the signed-in member (w_member_social). openid+profile are
+# what /v2/userinfo needs, to learn which person URN to post as.
+LI_SCOPE = "openid profile w_member_social"
+LI_API = "https://api.linkedin.com/rest"
+# Versioned API: the header is mandatory and LinkedIn sunsets versions on a
+# rolling ~12-month cycle, so this is a value to bump deliberately rather than
+# a detail to leave floating.
+LI_VERSION = "202608"
+
 
 def _global() -> dict:
     return firestore_db.get_global_settings()
@@ -570,8 +579,213 @@ def disconnect(uid: str, platform: str):
     firestore_db.clear_user_social(uid, platform)
 
 
+# --------------------------------------------------------------------------- #
+# LinkedIn
+# --------------------------------------------------------------------------- #
+def _li_headers(token: str) -> dict:
+    return {
+        "Authorization": "Bearer " + token,
+        "LinkedIn-Version": LI_VERSION,
+        "X-Restli-Protocol-Version": "2.0.0",
+        "Content-Type": "application/json",
+    }
+
+
+def linkedin_auth_url() -> str:
+    client_id = _global().get("linkedin_client_id", "")
+    if not client_id:
+        raise ValueError("LinkedIn client ID is not set. Ask the admin to add it in Settings.")
+    params = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": _redirect_uri("linkedin"),
+        "scope": LI_SCOPE,
+        "state": "vidzy",
+    }
+    return "https://www.linkedin.com/oauth/v2/authorization?" + urllib.parse.urlencode(params)
+
+
+def linkedin_exchange_code(uid: str, code: str) -> dict:
+    settings = _global()
+    resp = requests.post(
+        "https://www.linkedin.com/oauth/v2/accessToken",
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": _redirect_uri("linkedin"),
+            "client_id": settings.get("linkedin_client_id", ""),
+            "client_secret": settings.get("linkedin_client_secret", ""),
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=30,
+    )
+    if not resp.ok:
+        raise RuntimeError(
+            "LinkedIn rejected the sign-in ({}): {}".format(resp.status_code, resp.text[:300])
+        )
+    tok = resp.json()
+    access_token = tok.get("access_token", "")
+    if not access_token:
+        raise RuntimeError("LinkedIn did not return an access token")
+
+    # Who are we posting as? /v2/userinfo is the OpenID endpoint; its `sub` is
+    # the member id the person URN is built from.
+    me = requests.get(
+        "https://api.linkedin.com/v2/userinfo",
+        headers={"Authorization": "Bearer " + access_token},
+        timeout=30,
+    )
+    if not me.ok:
+        raise RuntimeError(
+            "LinkedIn profile lookup failed ({}): {}".format(me.status_code, me.text[:200])
+        )
+    profile = me.json()
+
+    info = {
+        "access_token": access_token,
+        # Member tokens last ~60 days and only approved partners get refresh
+        # tokens, so store the expiry and say so plainly once it lapses.
+        "expiry": time.time() + int(tok.get("expires_in", 60 * 24 * 3600)) - 60,
+        "person_urn": "urn:li:person:" + str(profile.get("sub", "")),
+        "name": profile.get("name", ""),
+    }
+    firestore_db.save_user_social(uid, "linkedin", info)
+    logger.success("LinkedIn connected for {}: {}".format(uid, info["name"]))
+    return info
+
+
+def _linkedin_token(uid: str):
+    info = firestore_db.get_user_social(uid).get("linkedin", {})
+    token = info.get("access_token", "")
+    if not token:
+        raise ValueError("LinkedIn is not connected")
+    if info.get("expiry", 0) and time.time() > info["expiry"]:
+        raise RuntimeError(
+            "The LinkedIn connection has expired (member tokens last about 60 days). "
+            "Reconnect LinkedIn in the dashboard."
+        )
+    return token, info.get("person_urn", "")
+
+
+def linkedin_upload(uid: str, video_path: str, title: str, description: str) -> dict:
+    token, owner = _linkedin_token(uid)
+    if not owner:
+        raise RuntimeError("LinkedIn connection is missing its member id - reconnect LinkedIn")
+    size = os.path.getsize(video_path)
+
+    init = requests.post(
+        LI_API + "/videos?action=initializeUpload",
+        headers=_li_headers(token),
+        data=json.dumps({
+            "initializeUploadRequest": {
+                "owner": owner,
+                "fileSizeBytes": size,
+                "uploadCaptions": False,
+                "uploadThumbnail": False,
+            }
+        }),
+        timeout=60,
+    )
+    if not init.ok:
+        raise RuntimeError(
+            "LinkedIn upload init failed ({}): {}".format(init.status_code, init.text[:400])
+        )
+    value = init.json().get("value", {})
+    video_urn = value.get("video", "")
+    upload_token = value.get("uploadToken", "")
+    instructions = value.get("uploadInstructions", [])
+    if not video_urn or not instructions:
+        raise RuntimeError("LinkedIn did not return upload instructions")
+
+    # Every part answers with an ETag, and finalizeUpload needs those ETags in
+    # the same order as the instructions or the video is reassembled wrong.
+    part_ids = []
+    with open(video_path, "rb") as f:
+        for part in instructions:
+            first, last = int(part["firstByte"]), int(part["lastByte"])
+            f.seek(first)
+            chunk = f.read(last - first + 1)
+            put = requests.put(
+                part["uploadUrl"],
+                headers={"Content-Type": "application/octet-stream"},
+                data=chunk,
+                timeout=600,
+            )
+            if not put.ok:
+                raise RuntimeError(
+                    "LinkedIn chunk upload failed ({}): {}".format(put.status_code, put.text[:200])
+                )
+            etag = (put.headers.get("etag") or put.headers.get("ETag") or "").strip('"')
+            if not etag:
+                raise RuntimeError("LinkedIn did not return an ETag for an uploaded part")
+            part_ids.append(etag)
+
+    fin = requests.post(
+        LI_API + "/videos?action=finalizeUpload",
+        headers=_li_headers(token),
+        data=json.dumps({
+            "finalizeUploadRequest": {
+                "video": video_urn,
+                "uploadToken": upload_token,
+                "uploadedPartIds": part_ids,
+            }
+        }),
+        timeout=120,
+    )
+    if not fin.ok:
+        raise RuntimeError(
+            "LinkedIn finalize failed ({}): {}".format(fin.status_code, fin.text[:400])
+        )
+
+    post = requests.post(
+        LI_API + "/posts",
+        headers=_li_headers(token),
+        data=json.dumps({
+            "author": owner,
+            "commentary": description or title or "",
+            "visibility": "PUBLIC",
+            "distribution": {
+                "feedDistribution": "MAIN_FEED",
+                "targetEntities": [],
+                "thirdPartyDistributionChannels": [],
+            },
+            "content": {"media": {"title": title or "Video", "id": video_urn}},
+            "lifecycleState": "PUBLISHED",
+            "isReshareDisabledByAuthor": False,
+        }),
+        timeout=60,
+    )
+    if not post.ok:
+        raise RuntimeError(
+            "LinkedIn post failed ({}): {}".format(post.status_code, post.text[:400])
+        )
+
+    post_urn = post.headers.get("x-restli-id", "")
+    logger.success("posted to LinkedIn: " + (post_urn or video_urn))
+    return {
+        "success": True,
+        "id": post_urn,
+        "url": ("https://www.linkedin.com/feed/update/" + post_urn) if post_urn else "",
+    }
+
+
+def linkedin_status(uid: str) -> dict:
+    info = firestore_db.get_user_social(uid).get("linkedin", {})
+    expired = bool(info.get("expiry")) and time.time() > info["expiry"]
+    return {
+        "connected": bool(info.get("access_token")) and not expired,
+        "expired": expired,
+        "name": info.get("name", ""),
+    }
+
+
 def status(uid: str) -> dict:
-    return {"youtube": youtube_status(uid), "tiktok": tiktok_status(uid), "facebook": facebook_status(uid)}
+    return {
+        "youtube": youtube_status(uid),
+        "tiktok": tiktok_status(uid),
+        "facebook": facebook_status(uid),
+        "linkedin": linkedin_status(uid),
+    }
 
 
 def publish_video(uid: str, video_path: str, meta: dict, platforms: list) -> dict:
@@ -612,6 +826,12 @@ def publish_video(uid: str, video_path: str, meta: dict, platforms: list) -> dic
         except Exception as e:  # noqa: BLE001
             logger.error(f"facebook publish failed: {e}")
             results["facebook"] = {"success": False, "error": str(e)}
+    if "linkedin" in platforms:
+        try:
+            results["linkedin"] = linkedin_upload(uid, video_path, title, description)
+        except Exception as e:  # noqa: BLE001
+            logger.error("linkedin publish failed: {}".format(e))
+            results["linkedin"] = {"success": False, "error": str(e)}
     if "instagram" in platforms:
         try:
             video_url = f"{base_url()}/media/{os.path.basename(video_path)}"

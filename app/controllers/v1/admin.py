@@ -65,6 +65,8 @@ def _settings_response(settings: dict) -> dict:
         "tiktok_client_secret": settings.get("tiktok_client_secret", ""),
         "facebook_app_id": settings.get("facebook_app_id", ""),
         "facebook_app_secret": settings.get("facebook_app_secret", ""),
+        "linkedin_client_id": settings.get("linkedin_client_id", ""),
+        "linkedin_client_secret": settings.get("linkedin_client_secret", ""),
         "publish_base_url": settings.get("publish_base_url", "http://localhost:8080"),
         "replicate_api_token": settings.get("replicate_api_token", ""),
         "avatar_image_path": settings.get("avatar_image_path", ""),
@@ -109,6 +111,8 @@ class SettingsBody(BaseModel):
     tiktok_client_secret: Optional[str] = None
     facebook_app_id: Optional[str] = None
     facebook_app_secret: Optional[str] = None
+    linkedin_client_id: Optional[str] = None
+    linkedin_client_secret: Optional[str] = None
     publish_base_url: Optional[str] = None
     replicate_api_token: Optional[str] = None
     smtp_host: Optional[str] = None

@@ -585,6 +585,8 @@ def social_connect(request: Request, platform: str = Path(...)):
             url = publish.tiktok_auth_url()
         elif platform == "facebook":
             url = publish.facebook_auth_url()
+        elif platform == "linkedin":
+            url = publish.linkedin_auth_url()
         else:
             return utils.get_response(400, message="unknown platform")
     except ValueError as e:
@@ -641,9 +643,24 @@ def facebook_callback(request: Request, code: str = "", error: str = ""):
         return _popup_close_html(f"Facebook connection failed: {e}", ok=False)
 
 
+@router.get("/saas/linkedin/callback", summary="LinkedIn OAuth callback")
+def linkedin_callback(request: Request, code: str = "", error: str = ""):
+    user = auth.get_current_user(request)
+    if not user:
+        return _popup_close_html("Your session expired - please log in and try again.", ok=False)
+    if error or not code:
+        return _popup_close_html(f"LinkedIn connection failed: {error or 'no code'}", ok=False)
+    try:
+        info = publish.linkedin_exchange_code(user["uid"], code)
+        return _popup_close_html(f"LinkedIn connected: {info.get('name') or 'your profile'}")
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"linkedin callback failed: {e}")
+        return _popup_close_html(f"LinkedIn connection failed: {e}", ok=False)
+
+
 @router.post("/saas/{platform}/disconnect", summary="Disconnect a platform")
 def social_disconnect(request: Request, platform: str = Path(...)):
-    if platform not in ("youtube", "tiktok", "facebook"):
+    if platform not in ("youtube", "tiktok", "facebook", "linkedin"):
         return utils.get_response(400, message="unknown platform")
     uid = _uid(request)
     publish.disconnect(uid, platform)

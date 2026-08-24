@@ -66,6 +66,7 @@ _SEED_FROM_CONFIG = (
     "youtube_client_id", "youtube_client_secret",
     "tiktok_client_key", "tiktok_client_secret",
     "facebook_app_id", "facebook_app_secret",
+    "linkedin_client_id", "linkedin_client_secret",
     "publish_base_url", "subtitle_enabled",
 )
 

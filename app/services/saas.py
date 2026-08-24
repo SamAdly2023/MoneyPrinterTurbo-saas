@@ -82,7 +82,9 @@ APP_STR_KEYS = {
     "openai_api_key", "openai_base_url", "openai_model_name",
     "youtube_client_id", "youtube_client_secret",
     "tiktok_client_key", "tiktok_client_secret",
-    "facebook_app_id", "facebook_app_secret", "publish_base_url",
+    "facebook_app_id", "facebook_app_secret",
+    "linkedin_client_id", "linkedin_client_secret",
+    "publish_base_url",
 }
 APP_LIST_KEYS = {"pexels_api_keys", "pixabay_api_keys"}
 UI_KEYS = {

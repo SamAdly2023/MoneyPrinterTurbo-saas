@@ -83,6 +83,7 @@
   #yt-btn.connected{border-color:#5a1e1e;color:#ff8a8a;background:rgba(239,68,68,.10)}
   #tt-btn.connected{border-color:#155e63;color:#5fe3ee;background:rgba(34,211,238,.10)}
   #fb-btn.connected{border-color:#1d3a63;color:#7db1ff;background:rgba(59,130,246,.10)}
+  #li-btn.connected{border-color:#14456b;color:#70b5f9;background:rgba(10,102,194,.12)}
   .pub-result{margin-top:10px;font-size:12.5px;display:flex;flex-direction:column;gap:5px}
   .pub-result .ok{color:#5ee08a} .pub-result .no{color:#ff9d9d}
 
@@ -216,6 +217,7 @@
           <button class="btn" id="yt-btn" title="Connect your YouTube channel">▶ YouTube</button>
           <button class="btn" id="tt-btn" title="Connect your TikTok account">◆ TikTok</button>
           <button class="btn" id="fb-btn" title="Connect your Facebook Page (and linked Instagram)">📘 Facebook</button>
+          <button class="btn" id="li-btn" title="Connect your LinkedIn profile">in LinkedIn</button>
           <button class="btn" id="auto-btn" title="Let AI invent viral Shorts and keep rendering them non-stop">⚡ Auto Mode</button>
           <select id="gen-one-aspect" title="Aspect ratio for this video" style="width:auto;padding:9px 11px">
             <option value="9:16">Portrait 9:16</option>
@@ -410,6 +412,7 @@
             <label class="switch" style="font-weight:500"><input type="checkbox" id="p-pub-yt" /> YouTube</label>
             <label class="switch" style="font-weight:500"><input type="checkbox" id="p-pub-tt" /> TikTok (drafts)</label>
             <label class="switch" style="font-weight:500"><input type="checkbox" id="p-pub-fb" /> Facebook Page</label>
+          <label class="switch" style="font-weight:500"><input type="checkbox" id="p-pub-li" /> LinkedIn</label>
             <label class="switch" style="font-weight:500"><input type="checkbox" id="p-pub-ig" /> Instagram <span class="desc">(needs the hosted site - Meta fetches the video by URL)</span></label>
           </div>
         </div>
@@ -547,6 +550,8 @@
           <div class="field"><label>TikTok client secret</label><input id="s-tt-secret" placeholder="..." /></div>
           <div class="field"><label>Facebook / Instagram app ID <span class="desc">one Meta app covers both</span></label><input id="s-fb-id" placeholder="1234567890..." /></div>
           <div class="field"><label>Facebook / Instagram app secret</label><input id="s-fb-secret" placeholder="..." /></div>
+          <div class="field"><label>LinkedIn client ID</label><input id="s-li-id" placeholder="86xxxxxxxxxxxx" /></div>
+          <div class="field"><label>LinkedIn client secret</label><input id="s-li-secret" placeholder="..." /></div>
         </div>
 
         <div class="section-title">Email notifications</div>
@@ -696,14 +701,19 @@ async function refreshSocial(){
   try{
     const d=await api("/social/status");
     social=d;
-    const yt=$("#yt-btn"),tt=$("#tt-btn"),fb=$("#fb-btn");
+    const yt=$("#yt-btn"),tt=$("#tt-btn"),fb=$("#fb-btn"),li=$("#li-btn");
     yt.className="btn"+(d.youtube.connected?" connected":"");
     yt.textContent=d.youtube.connected?("▶ YouTube ✓"+(d.youtube.channel?" "+d.youtube.channel:"")):"▶ YouTube";
     tt.className="btn"+(d.tiktok.connected?" connected":"");
     tt.textContent=d.tiktok.connected?"◆ TikTok ✓":"◆ TikTok";
     fb.className="btn"+(d.facebook.connected?" connected":"");
     fb.textContent=d.facebook.connected?("📘 Facebook ✓"+(d.facebook.instagram?" +IG":"")):"📘 Facebook";
-    const ns=JSON.stringify([d.youtube.connected,d.youtube.channel,d.tiktok.connected,d.facebook.connected,d.facebook.instagram]);
+    const liOn=d.linkedin&&d.linkedin.connected;
+    li.className="btn"+(liOn?" connected":"");
+    // An expired member token still looks "connected" in the database, so say
+    // so on the button rather than letting a publish fail silently later.
+    li.textContent=liOn?("in LinkedIn ✓"+(d.linkedin.name?" "+d.linkedin.name:"")):(d.linkedin&&d.linkedin.expired?"in LinkedIn (expired)":"in LinkedIn");
+    const ns=JSON.stringify([d.youtube.connected,d.youtube.channel,d.tiktok.connected,d.facebook.connected,d.facebook.instagram,liOn]);
     if(ns!==socialSig){socialSig=ns;lastSig="";}   // refresh job cards so publish buttons update
   }catch(e){}
 }
@@ -886,6 +896,10 @@ $("#tt-btn").onclick=()=>{
 $("#fb-btn").onclick=()=>{
   if(social.facebook&&social.facebook.connected){ if(confirm("Disconnect Facebook (and Instagram)?"))api("/facebook/disconnect",{method:"POST"}).then(()=>{refreshSocial();toast("Facebook disconnected")}); }
   else connectPlatform("facebook");
+};
+$("#li-btn").onclick=()=>{
+  if(social.linkedin&&social.linkedin.connected){ if(confirm("Disconnect LinkedIn?"))api("/linkedin/disconnect",{method:"POST"}).then(()=>{refreshSocial();toast("LinkedIn disconnected")}); }
+  else connectPlatform("linkedin");
 };
 window.addEventListener("message",e=>{ if(e.data==="mpt-social-updated"){refreshSocial();toast("Connection updated");} });
 window.publishJob=async(id,platforms)=>{
@@ -1070,6 +1084,8 @@ async function loadSettings(){
     $("#s-tt-secret").value=s.tiktok_client_secret||"";
     $("#s-fb-id").value=s.facebook_app_id||"";
     $("#s-fb-secret").value=s.facebook_app_secret||"";
+    $("#s-li-id").value=s.linkedin_client_id||"";
+    $("#s-li-secret").value=s.linkedin_client_secret||"";
     const base=(s.publish_base_url||"http://localhost:8080").replace(/\/$/,"");
     $("#s-baseurl").value=base;
     updateRedirects(base);
@@ -1122,6 +1138,8 @@ $("#save-settings").onclick=async()=>{
     tiktok_client_secret:$("#s-tt-secret").value.trim(),
     facebook_app_id:$("#s-fb-id").value.trim(),
     facebook_app_secret:$("#s-fb-secret").value.trim(),
+    linkedin_client_id:$("#s-li-id").value.trim(),
+    linkedin_client_secret:$("#s-li-secret").value.trim(),
     publish_base_url:$("#s-baseurl").value.trim()||"http://localhost:8080",
     smtp_host:$("#s-smtp-host").value.trim(),
     smtp_port:parseInt($("#s-smtp-port").value,10)||587,
@@ -1153,6 +1171,7 @@ async function loadProfile(){
     $("#p-pub-yt").checked=plats.includes("youtube");
     $("#p-pub-tt").checked=plats.includes("tiktok");
     $("#p-pub-fb").checked=plats.includes("facebook");
+    $("#p-pub-li").checked=plats.includes("linkedin");
     $("#p-pub-ig").checked=plats.includes("instagram");
     $("#p-yt-privacy").value=p.youtube_privacy||"public";
     $("#p-aspect").value=p.video_aspect||"";
@@ -1304,7 +1323,7 @@ $("#save-profile").onclick=async()=>{
     business_address:$("#p-address").value.trim(),
     business_bio:$("#p-bio").value.trim(),
     auto_publish:$("#p-autopub").checked,
-    auto_publish_platforms:[...($("#p-pub-yt").checked?["youtube"]:[]),...($("#p-pub-tt").checked?["tiktok"]:[]),...($("#p-pub-fb").checked?["facebook"]:[]),...($("#p-pub-ig").checked?["instagram"]:[])],
+    auto_publish_platforms:[...($("#p-pub-yt").checked?["youtube"]:[]),...($("#p-pub-tt").checked?["tiktok"]:[]),...($("#p-pub-fb").checked?["facebook"]:[]),...($("#p-pub-li").checked?["linkedin"]:[]),...($("#p-pub-ig").checked?["instagram"]:[])],
     youtube_privacy:$("#p-yt-privacy").value,
     video_aspect:$("#p-aspect").value,
     subtitle_position:$("#p-subpos").value,
