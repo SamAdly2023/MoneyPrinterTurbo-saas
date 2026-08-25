@@ -19,6 +19,10 @@ pydub==0.25.1
 litellm==1.86.2
 itsdangerous==2.2.0
 firebase-admin==6.9.0
+# MySQL backend for cPanel/shared-hosting deployments (MPT_DB=mysql) - see
+# app/services/db_mysql.py. Pure-Python, no compiled C extension, so it
+# installs cleanly on shared hosting without a compiler.
+PyMySQL==1.2.0
 
 # Optional unofficial g4f provider is intentionally not installed by default.
 # Use `uv sync --extra g4f` only when you explicitly accept that provider risk.

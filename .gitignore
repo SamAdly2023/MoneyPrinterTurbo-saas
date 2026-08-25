@@ -42,3 +42,9 @@ streamlit.log
 
 # Local run environment (see Run-Vidzy-Local.bat)
 .venv-local/
+
+# Secrets export - never commit
+/CREDENTIALS.md
+
+# Downloaded service account keys - never commit
+/secrets/

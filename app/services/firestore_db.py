@@ -7,7 +7,8 @@ first. The fix is not to change 96 call sites - it is to let this module
 decide which implementation those calls land in:
 
     MPT_DB=sqlite     -> app/services/db_sqlite.py    (the local app)
-    unset / firestore -> app/services/db_firestore.py (the hosted site)
+    MPT_DB=mysql      -> app/services/db_mysql.py      (cPanel/shared hosting)
+    unset / firestore -> app/services/db_firestore.py (Google Cloud hosting)
 
 Firebase Auth is untouched either way. Sign-in still verifies a Firebase ID
 token (app/services/auth.py, which initialises firebase_admin itself), so the
@@ -31,12 +32,15 @@ _BACKEND = (os.getenv("MPT_DB", "") or "firestore").strip().lower()
 if _BACKEND in ("sqlite", "local", "sqlite3"):
     _impl = importlib.import_module("app.services.db_sqlite")
     logger.info("data backend: sqlite (local)")
+elif _BACKEND == "mysql":
+    _impl = importlib.import_module("app.services.db_mysql")
+    logger.info("data backend: mysql")
 else:
     _impl = importlib.import_module("app.services.db_firestore")
 
 
 def backend_name() -> str:
-    return "sqlite" if _impl.__name__.endswith("db_sqlite") else "firestore"
+    return _impl.__name__.rsplit("_", 1)[-1]
 
 
 def __getattr__(name):
