@@ -23,6 +23,10 @@ firebase-admin==6.9.0
 # app/services/db_mysql.py. Pure-Python, no compiled C extension, so it
 # installs cleanly on shared hosting without a compiler.
 PyMySQL==1.2.0
+# PostgreSQL backend (MPT_DB=postgres) - see app/services/db_postgres.py.
+# The -binary build ships precompiled wheels, same reasoning as PyMySQL
+# above: no C compiler needed on shared hosting.
+psycopg2-binary==2.9.12
 
 # Optional unofficial g4f provider is intentionally not installed by default.
 # Use `uv sync --extra g4f` only when you explicitly accept that provider risk.

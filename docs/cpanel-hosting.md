@@ -3,23 +3,38 @@
 Replaces the Google Cloud Run architecture entirely. What's left from Google:
 **Firebase Authentication only** (new project `vidzone-app`, owned by
 `samadly728@gmail.com`) — no Firestore, no Cloud Run, no Cloud Build, no
-Cloud Storage bucket. Data lives in MySQL via cPanel's own database, files
-live on cPanel's own disk, and rendering happens in-process on cPanel's CPU —
-the same architecture as the local desktop app, just running on a server
-instead of a laptop.
+Cloud Storage bucket. Data lives in a SQL database via cPanel's own database
+tooling, files live on cPanel's own disk, and rendering happens in-process on
+cPanel's CPU — the same architecture as the local desktop app, just running
+on a server instead of a laptop.
+
+Two backends exist, both built to the same interface and both verified
+against a real server under real concurrent load (8 threads racing to claim
+20 jobs, zero double-claims, on each): `app/services/db_postgres.py` and
+`app/services/db_mysql.py`. **PostgreSQL is the one actually in use** — pick
+whichever `MPT_DB` block below matches your cPanel plan.
 
 ## Environment variables to set on cPanel
 
+### PostgreSQL (in use)
+
 | Variable | Value | Why |
 |---|---|---|
-| `MPT_DB` | `mysql` | Selects `app/services/db_mysql.py` as the data backend |
-| `MPT_MYSQL_HOST` | usually `localhost` | cPanel's MySQL is almost always on the same box |
-| `MPT_MYSQL_PORT` | `3306` | MySQL default |
-| `MPT_MYSQL_DB` | *(from cPanel → MySQL Databases)* | Often prefixed with your cPanel username, e.g. `youruser_vidzy` |
-| `MPT_MYSQL_USER` | *(from cPanel → MySQL Databases)* | Same prefix convention |
-| `MPT_MYSQL_PASSWORD` | *(the password you set when creating the DB user)* | |
+| `MPT_DB` | `postgres` | Selects `app/services/db_postgres.py` as the data backend |
+| `MPT_PG_HOST` | usually `localhost` | cPanel's PostgreSQL is almost always on the same box |
+| `MPT_PG_PORT` | `5432` | PostgreSQL default |
+| `MPT_PG_DB` | *(from cPanel → PostgreSQL Databases)* | Often prefixed with your cPanel username, e.g. `youruser_vidzy` |
+| `MPT_PG_USER` | *(from cPanel → PostgreSQL Databases)* | Same prefix convention |
+| `MPT_PG_PASSWORD` | *(the password you set when creating the DB user)* | |
 | `GOOGLE_APPLICATION_CREDENTIALS` | full path to `secrets/vidzone-app-firebase-adminsdk.json` on the server | Lets `firebase_admin` verify login tokens against the new Auth-only project |
 | `GOOGLE_CLOUD_PROJECT` | `vidzone-app` | |
+
+### MySQL (alternative, if the plan doesn't offer PostgreSQL)
+
+| Variable | Value | Why |
+|---|---|---|
+| `MPT_DB` | `mysql` | Selects `app/services/db_mysql.py` instead |
+| `MPT_MYSQL_HOST` / `_PORT` / `_DB` / `_USER` / `_PASSWORD` | *(from cPanel → MySQL Databases)* | Same shape as the Postgres vars above, MySQL default port `3306` |
 
 Leave unset (this is the important part — these already default correctly
 for a local-disk, in-process setup):
@@ -32,36 +47,41 @@ for a local-disk, in-process setup):
 
 ## One-time setup, in order
 
-1. **cPanel → MySQL Databases**: create a database and a user with full
-   privileges on it. Note the three values (db name, username, password) —
-   they go into the env vars above.
-2. **Get the schema created**: nothing to run by hand — `app/services/db_mysql.py`
-   creates its tables automatically the first time the app connects
-   (`_init_schema`, called from `_connect()`). Just starting the app with the
-   env vars set is enough.
+1. **cPanel → PostgreSQL Databases** (or MySQL Databases, if using that
+   instead): create a database and a user with full privileges on it. Note
+   the three values (db name, username, password) — they go into the env
+   vars above.
+2. **Get the schema created**: nothing to run by hand — both `db_postgres.py`
+   and `db_mysql.py` create their tables automatically the first time the app
+   connects (`_init_schema`, called from `_connect()`). Just starting the app
+   with the env vars set is enough.
 3. **Copy the app's private files onto the server** (never through git):
    - `secrets/vidzone-app-firebase-adminsdk.json` — generated already, ask
      for it directly, never comes via a public channel.
-   - `config.toml` — only matters for whatever `MPT_DB=mysql`'s first-run
-     seeding step reads *before* the database has its own copy of Settings;
-     after the first run, edits happen in the app's Settings page and MySQL
-     is authoritative, `config.toml` is no longer read for these values.
-4. **Run the data migration once**, from a machine with both Firestore and
-   MySQL reachable (see `scripts/migrate_firestore_to_mysql.py`'s own
-   docstring for the exact env vars it needs — it needs *both* a Firestore
-   credential for `vvvvv-504116` and the MySQL connection details above at
-   the same time, which is different from the app's normal run-time need for
-   only one or the other).
+   - `config.toml` — only matters for whatever the first-run seeding step
+     reads *before* the database has its own copy of Settings; after the
+     first run, edits happen in the app's Settings page and the database is
+     authoritative, `config.toml` is no longer read for these values.
+4. **Run the data migration once** (`scripts/migrate_firestore_to_sql.py`),
+   from a machine with both Firestore and the target database reachable at
+   the same time — set `MPT_DB=postgres` (or `mysql`) plus that backend's
+   connection vars, *and* `GOOGLE_APPLICATION_CREDENTIALS` pointing at a
+   Firestore-reading credential for `vvvvv-504116`, together. That combined
+   requirement is specific to running the migration; the live app afterward
+   only ever needs one side or the other.
 5. **Start the app** with the env vars from the table above. First request
-   will show `data backend: mysql` in the logs if it's wired correctly.
+   will show `data backend: postgres` (or `mysql`) in the logs if it's wired
+   correctly.
 
 ## What's NOT needed anymore
 
 Cloud Run service/job, Cloud Build, Artifact Registry, Cloud Scheduler,
 Firebase Hosting, the GCS bucket (`vvvvv-504116-mpt-data`) — none of this is
-read or written by the app once `MPT_DB=mysql` and `MPT_RENDER_MODE` is
-unset. The old project (`vvvvv-504116`) stays dormant as a safety net, not
-deleted, per the plan this doc came out of.
+read or written by the app once `MPT_DB` points at a SQL backend and
+`MPT_RENDER_MODE` is unset. The old project (`vvvvv-504116`) stays dormant as
+a safety net until the data and files above are confirmed copied and the
+cPanel deployment is confirmed working end-to-end — see the migration plan
+for the exact order.
 
 ## YouTube — the one piece that needs a manual step
 

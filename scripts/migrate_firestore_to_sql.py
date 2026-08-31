@@ -1,27 +1,31 @@
-"""One-time copy: Firestore (vvvvv-504116) -> MySQL (cPanel).
+"""One-time copy: Firestore (vvvvv-504116) -> MySQL or PostgreSQL (cPanel).
 
 Part of the move off Google Cloud entirely: Firebase stays for Auth only
 (new project), while Firestore's data - users, jobs, settings, invites,
-visitor analytics - moves into MySQL on cPanel, read/written from then on by
-app/services/db_mysql.py instead of db_firestore.py.
+visitor analytics - moves into whichever SQL database cPanel offers.
 
-Reads Firestore via the existing db_firestore.py module (no new Firestore
-code to get subtly wrong), and writes through db_mysql.py's own functions -
-so the exact same create/save/update logic this script exercises is the logic
-the live app will use afterward. Idempotent: safe to re-run - db_mysql.py's
-INSERT ... ON DUPLICATE KEY UPDATE means running this twice just overwrites
-with the same data rather than erroring or duplicating.
+Reads Firestore via the existing db_firestore.py module directly (source is
+always Firestore, regardless of MPT_DB), and writes through the
+firestore_db.py facade (target follows MPT_DB, same as the live app) - so the
+exact same create/save/update logic this script exercises is the logic the
+app uses afterward, on whichever backend you point it at. Idempotent: safe to
+re-run - both db_mysql.py and db_postgres.py upsert on conflict, so running
+this twice just overwrites with the same data rather than erroring or
+duplicating.
 
-Firebase Auth UIDs are the join key throughout. Run
-scripts/migrate_firestore_to_mysql.py only AFTER `firebase auth:export` /
-`auth:import` have copied the users into the new Auth project with the same
-UIDs - otherwise every document here lands under a uid nothing can sign in as.
+Firebase Auth UIDs are the join key throughout. Run this only AFTER
+`firebase auth:export` / `auth:import` have copied the users into the new
+Auth project with the same UIDs - otherwise every document here lands under a
+uid nothing can sign in as.
 
-Usage:
+Usage (MySQL):
+    export MPT_DB=mysql
     export MPT_MYSQL_HOST=...   MPT_MYSQL_PORT=3306
     export MPT_MYSQL_DB=...     MPT_MYSQL_USER=...   MPT_MYSQL_PASSWORD=...
     export GOOGLE_APPLICATION_CREDENTIALS=/path/to/a/vvvvv-504116/key.json
-    python scripts/migrate_firestore_to_mysql.py [--dry-run]
+    python scripts/migrate_firestore_to_sql.py [--dry-run]
+
+Usage (PostgreSQL): same, but MPT_DB=postgres and MPT_PG_HOST/PORT/DB/USER/PASSWORD.
 """
 
 import argparse
@@ -37,18 +41,21 @@ os.environ.setdefault("GOOGLE_CLOUD_PROJECT", "vvvvv-504116")
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dry-run", action="store_true", help="report only, write nothing to MySQL")
+    ap.add_argument("--dry-run", action="store_true", help="report only, write nothing to the target")
     args = ap.parse_args()
 
     from app.services import db_firestore as src
-    from app.services import db_mysql as dst
+    from app.services import firestore_db as dst  # facade: routes to MPT_DB's backend
+
+    if dst.backend_name() == "firestore":
+        print("MPT_DB is unset or 'firestore' - set it to 'mysql' or 'postgres' before running this.")
+        return 1
 
     print(f"source: Firestore ({os.environ['GOOGLE_CLOUD_PROJECT']})")
     if not args.dry_run:
-        dst._connect()  # creates the schema up front so failures show early
-        print(f"target: MySQL {os.getenv('MPT_MYSQL_USER')}@{os.getenv('MPT_MYSQL_HOST')}/{os.getenv('MPT_MYSQL_DB')}")
+        print(f"target: {dst.backend_name()}")
     else:
-        print("target: MySQL (DRY RUN - nothing will be written)")
+        print(f"target: {dst.backend_name()} (DRY RUN - nothing will be written)")
 
     # 1. Global settings - LLM keys, platform OAuth credentials, publish_base_url.
     settings = src.get_global_settings()

@@ -8,6 +8,7 @@ decide which implementation those calls land in:
 
     MPT_DB=sqlite     -> app/services/db_sqlite.py    (the local app)
     MPT_DB=mysql      -> app/services/db_mysql.py      (cPanel/shared hosting)
+    MPT_DB=postgres   -> app/services/db_postgres.py   (cPanel/shared hosting)
     unset / firestore -> app/services/db_firestore.py (Google Cloud hosting)
 
 Firebase Auth is untouched either way. Sign-in still verifies a Firebase ID
@@ -35,6 +36,9 @@ if _BACKEND in ("sqlite", "local", "sqlite3"):
 elif _BACKEND == "mysql":
     _impl = importlib.import_module("app.services.db_mysql")
     logger.info("data backend: mysql")
+elif _BACKEND in ("postgres", "postgresql", "pg"):
+    _impl = importlib.import_module("app.services.db_postgres")
+    logger.info("data backend: postgres")
 else:
     _impl = importlib.import_module("app.services.db_firestore")
 
