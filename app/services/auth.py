@@ -19,6 +19,7 @@ from firebase_admin import auth as firebase_auth
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from app.config import config
+from app.services import billing
 from app.services import firebase_init  # noqa: F401 - ensures app is initialized first
 from app.services import firestore_db
 
@@ -90,4 +91,11 @@ def get_current_user(request: Request) -> dict | None:
         # predate the feature keep working untouched.
         "can_render": bool(user.get("can_render", True)),
         "can_clip": bool(user.get("can_clip", True)),
+        # Credits/subscription are meaningless on the local desktop app
+        # (billing.live_billing_enabled() is False there), but harmless to
+        # always include - the dashboard only shows the credits badge / Auto
+        # Mode paywall prompt when the live-site flag is also true.
+        "credits": int(user.get("credits", 0)),
+        "auto_mode_subscription_active": bool(user.get("auto_mode_subscription_active")),
+        "live_billing_enabled": billing.live_billing_enabled(),
     }

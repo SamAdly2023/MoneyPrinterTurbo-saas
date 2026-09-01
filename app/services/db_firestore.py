@@ -121,6 +121,105 @@ def set_user_admin(uid: str, is_admin: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Credits (live-site paywall - see app/services/billing.py)
+# ---------------------------------------------------------------------------
+def get_user_credits(uid: str) -> int:
+    user = get_user(uid)
+    return int((user or {}).get("credits", 0))
+
+
+def reserve_credits(uid: str, count: int = 1) -> bool:
+    """Atomically spend `count` credits if the balance covers it, all or
+    nothing - used to reserve credits for a whole batch of clip jobs in one
+    call rather than letting some clips queue and others get rejected
+    mid-batch. Same per-user transactional pattern as
+    claim_next_auto_mode_user (read the user doc, decide, write, all inside
+    one Firestore transaction)."""
+    ref = db.collection("users").document(uid)
+
+    @firestore.transactional
+    def _reserve(transaction):
+        snap = ref.get(transaction=transaction)
+        if not snap.exists:
+            return False
+        data = snap.to_dict()
+        balance = int(data.get("credits", 0))
+        if balance < count:
+            return False
+        transaction.update(ref, {"credits": balance - count})
+        return True
+
+    return _reserve(db.transaction())
+
+
+def refund_credits(uid: str, count: int = 1) -> None:
+    """Called from the render failure path - a queued job reserves credits
+    up front, and this gives them back if the render never delivered."""
+    ref = db.collection("users").document(uid)
+
+    @firestore.transactional
+    def _refund(transaction):
+        snap = ref.get(transaction=transaction)
+        if not snap.exists:
+            return
+        balance = int(snap.to_dict().get("credits", 0))
+        transaction.update(ref, {"credits": balance + count})
+
+    _refund(db.transaction())
+
+
+def add_credits(uid: str, count: int) -> None:
+    """Plain grant - admin top-ups. The PayPal purchase path uses
+    record_payment_if_new instead, which wraps this with idempotency."""
+    refund_credits(uid, count)
+
+
+_PROCESSED_PAYMENTS_COLLECTION = "processed_payments"
+
+
+def record_payment_if_new(payment_id: str, uid: str, count: int) -> bool:
+    """Grants `count` credits for a PayPal payment exactly once.
+
+    PayPal retries webhooks and a client can replay a capture call, so the
+    payment-id-doc-create and the credit grant happen in the same
+    transaction: if a document already exists at that id, this is a no-op
+    and returns False - the caller (billing.py) uses that to tell an
+    already-processed payment apart from a newly-applied one, without ever
+    risking double-crediting the same payment. Firestore's document-create
+    semantics inside a transaction (`transaction.create`, which fails if the
+    document already exists) are the backstop a unique constraint gives the
+    SQL backends - it's what actually closes the race, not just the read
+    check before it.
+    """
+    payment_ref = db.collection(_PROCESSED_PAYMENTS_COLLECTION).document(payment_id)
+    user_ref = db.collection("users").document(uid)
+
+    @firestore.transactional
+    def _claim(transaction):
+        snap = payment_ref.get(transaction=transaction)
+        if snap.exists:
+            return False
+        user_snap = user_ref.get(transaction=transaction)
+        if not user_snap.exists:
+            return False
+        try:
+            transaction.create(payment_ref, {
+                "uid": uid, "credits": count, "created_at": _now(),
+            })
+        except Exception:  # noqa: BLE001 - lost the create race; already processed
+            return False
+        balance = int(user_snap.to_dict().get("credits", 0))
+        transaction.update(user_ref, {"credits": balance + count})
+        return True
+
+    return _claim(db.transaction())
+
+
+def set_auto_mode_subscription(uid: str, active: bool) -> None:
+    db.collection("users").document(uid).update({"auto_mode_subscription_active": active})
+
+
+# ---------------------------------------------------------------------------
 # API keys (external platform access - see app/controllers/v1/external.py)
 # ---------------------------------------------------------------------------
 def set_user_api_key(uid: str, key_hash: str, prefix: str) -> None:

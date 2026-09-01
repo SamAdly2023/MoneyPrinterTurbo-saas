@@ -36,7 +36,7 @@ from pydantic import BaseModel
 
 from app.controllers.v1.base import new_router
 from app.models.schema import MaterialInfo, VideoParams
-from app.services import auth, clips, firestore_db, llm, publish, saas
+from app.services import auth, billing, clips, firestore_db, llm, publish, saas
 from app.utils import utils
 
 router = new_router()
@@ -61,6 +61,27 @@ def _blocked(request: Request, flag: str, label: str):
             403, message=f"{label} has been disabled for this account. Contact support."
         )
     return None
+
+
+def _require_credits(request: Request, count: int = 1):
+    """402 when the account can't cover `count` credits - a no-op on the
+    local desktop app, where nothing is ever metered.
+
+    Reserves atomically (see reserve_credits in each db_*.py backend) rather
+    than just checking the balance, so this doubles as the actual spend, not
+    a separate check-then-spend that a race could slip between. On render
+    failure, Engine._refund_job_credit (app/services/saas.py) gives it back;
+    queue_clip_jobs reserves `count` up front for its whole batch in one call
+    so it never partially succeeds.
+    """
+    if not billing.live_billing_enabled():
+        return None
+    uid = _uid(request)
+    if firestore_db.reserve_credits(uid, count):
+        return None
+    return utils.get_response(
+        402, message=f"Not enough credits ({count} needed). Buy more to keep generating."
+    )
 
 
 def _uid(request: Request) -> str:
@@ -372,7 +393,7 @@ def list_jobs(request: Request):
     counts = {"pending": 0, "processing": 0, "done": 0, "failed": 0}
     for j in jobs:
         counts[j["status"]] = counts.get(j["status"], 0) + 1
-    status = saas.engine.status()
+    status = saas.engine.status(uid)
     status["auto_mode"] = firestore_db.get_user_profile(uid).get("auto_mode", False)
     return utils.get_response(200, {"jobs": jobs, "counts": counts, "engine": status})
 
@@ -380,6 +401,8 @@ def list_jobs(request: Request):
 @router.post("/saas/jobs", summary="Save a script and add it to the queue")
 def create_job(request: Request, body: JobBody):
     if (denied := _blocked(request, "can_render", "Video rendering")) is not None:
+        return denied
+    if (denied := _require_credits(request, 1)) is not None:
         return denied
     if not body.video_subject.strip():
         return utils.get_response(400, message="video_subject is required")
@@ -420,6 +443,8 @@ def delete_job(request: Request, job_id: str = Path(...)):
 def retry_job(request: Request, job_id: str = Path(...)):
     if (denied := _blocked(request, "can_render", "Video rendering")) is not None:
         return denied
+    if (denied := _require_credits(request, 1)) is not None:
+        return denied
     uid = _uid(request)
     job = saas.store.get(uid, job_id)
     if not job:
@@ -435,7 +460,7 @@ def retry_job(request: Request, job_id: str = Path(...)):
 @router.get("/saas/engine", summary="Shared engine status + this user's auto-mode flag")
 def engine_status(request: Request):
     uid = _uid(request)
-    status = saas.engine.status()
+    status = saas.engine.status(uid)
     status["auto_mode"] = firestore_db.get_user_profile(uid).get("auto_mode", False)
     return utils.get_response(200, status)
 
@@ -443,17 +468,22 @@ def engine_status(request: Request):
 @router.post("/saas/engine/auto/start", summary="Enable this user's auto-mode")
 def engine_auto_start(request: Request):
     uid = _uid(request)
-    if not saas.auto_mode_available():
+    if not saas.auto_mode_available(uid):
         # The UI hides the button here, but the endpoint is public - don't
-        # rely on the client to enforce where generation is allowed.
-        return utils.get_response(
-            400, {}, "Auto Mode runs on the local app, not on the hosted site."
+        # rely on the client to enforce where generation is allowed. On the
+        # live site this means "no active $29/mo subscription", not "Auto
+        # Mode is unavailable outright" - the message reflects that.
+        message = (
+            "Auto Mode needs an active subscription on this site."
+            if billing.live_billing_enabled()
+            else "Auto Mode runs on the local app, not on the hosted site."
         )
+        return utils.get_response(400, {}, message)
     profile = firestore_db.get_user_profile(uid)
     profile["auto_mode"] = True
     firestore_db.save_user_profile(uid, profile)
     saas.engine.wake()
-    status = saas.engine.status()
+    status = saas.engine.status(uid)
     status["auto_mode"] = True
     return utils.get_response(200, status)
 
@@ -464,7 +494,7 @@ def engine_auto_stop(request: Request):
     profile = firestore_db.get_user_profile(uid)
     profile["auto_mode"] = False
     firestore_db.save_user_profile(uid, profile)
-    status = saas.engine.status()
+    status = saas.engine.status(uid)
     status["auto_mode"] = False
     return utils.get_response(200, status)
 
@@ -478,6 +508,8 @@ class GenerateOneBody(BaseModel):
 @router.post("/saas/generate-one", summary="Generate a single AI video right now, without turning on Auto Mode")
 def generate_one(request: Request, body: GenerateOneBody = None):
     if (denied := _blocked(request, "can_render", "Video rendering")) is not None:
+        return denied
+    if (denied := _require_credits(request, 1)) is not None:
         return denied
     uid = _uid(request)
     profile = firestore_db.get_user_profile(uid)
@@ -887,6 +919,13 @@ def queue_clip_jobs(request: Request, body: ClipQueueBody):
     if not cleaned:
         return utils.get_response(400, message="no valid segments to queue")
 
+    # Reserve for the actual number of jobs about to be created (post-
+    # validation), not the raw segment count the client sent - and the whole
+    # batch atomically in one call, so a low balance can't queue some clips
+    # and reject others mid-batch.
+    if (denied := _require_credits(request, len(cleaned))) is not None:
+        return denied
+
     jobs = saas.queue_clip_jobs(uid, info["path"], cleaned, info.get("transcript_segments") or [])
     _CLIP_UPLOADS.pop(body.upload_id, None)
     return utils.get_response(200, {"jobs": jobs})
@@ -922,3 +961,98 @@ def generate_script(request: Request, body: GenScriptBody):
     if not script or "Error: " in str(script):
         return utils.get_response(500, message=str(script) or "empty script")
     return utils.get_response(200, {"video_script": script})
+
+
+# --------------------------------------------------------------------------- #
+# Billing (live site only - see app/services/billing.py)
+# --------------------------------------------------------------------------- #
+@router.get("/saas/credits/packages", summary="List credit packages and current pricing")
+def list_packages(request: Request):  # noqa: ARG001 - kept symmetric with the other endpoints
+    if not billing.live_billing_enabled():
+        return utils.get_response(200, {"packages": [], "paypal_client_id": "", "auto_mode_price_usd": 0})
+    packages = [
+        {"id": pid, "credits": pkg["credits"], "label": pkg["label"], "price_usd": billing.package_price(pid)}
+        for pid, pkg in billing.PACKAGES.items()
+    ]
+    # The client ID is meant to be public (it's what the PayPal JS SDK is
+    # loaded with) - only the secret, which never leaves billing.py's server
+    # calls, is sensitive.
+    return utils.get_response(200, {
+        "packages": packages,
+        "paypal_client_id": billing.paypal_client_id(),
+        "auto_mode_price_usd": billing.auto_mode_price(),
+    })
+
+
+class CheckoutBody(BaseModel):
+    package_id: str
+
+
+@router.post("/saas/credits/checkout", summary="Start a PayPal order for a credit package")
+def credits_checkout(request: Request, body: CheckoutBody):
+    if not billing.live_billing_enabled():
+        return utils.get_response(400, message="Credits are only sold on the hosted site.")
+    uid = _uid(request)
+    try:
+        order = billing.create_order(uid, body.package_id)
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"PayPal order creation failed for {uid}: {e}")
+        return utils.get_response(502, message=f"PayPal error: {e}")
+    return utils.get_response(200, {"order_id": order.get("id", "")})
+
+
+class CaptureBody(BaseModel):
+    order_id: str
+
+
+@router.post("/saas/credits/capture", summary="Capture an approved PayPal order and grant credits")
+def credits_capture(request: Request, body: CaptureBody):
+    if not billing.live_billing_enabled():
+        return utils.get_response(400, message="Credits are only sold on the hosted site.")
+    uid = _uid(request)
+    try:
+        result = billing.capture_order(uid, body.order_id)
+    except Exception as e:  # noqa: BLE001 - PayPal errors, mismatched order, etc.
+        logger.error(f"PayPal capture failed for {uid}: {e}")
+        return utils.get_response(502, message=f"Payment could not be completed: {e}")
+    return utils.get_response(200, result)
+
+
+@router.post("/saas/automode/subscribe", summary="Start a PayPal subscription unlocking Auto Mode")
+def automode_subscribe(request: Request):
+    if not billing.live_billing_enabled():
+        return utils.get_response(400, message="Subscriptions are only sold on the hosted site.")
+    uid = _uid(request)
+    try:
+        sub = billing.create_subscription(uid)
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"PayPal subscription creation failed for {uid}: {e}")
+        return utils.get_response(502, message=f"PayPal error: {e}")
+    approve_url = next(
+        (link["href"] for link in sub.get("links", []) if link.get("rel") == "approve"), ""
+    )
+    return utils.get_response(200, {"subscription_id": sub.get("id", ""), "approve_url": approve_url})
+
+
+@router.post("/saas/paypal/webhook", summary="PayPal webhook - authoritative source for subscription state")
+async def paypal_webhook(request: Request):
+    """No auth cookie here - this is PayPal's server calling us, not a
+    signed-in browser. Trust nothing about the request body until its
+    signature is verified; that verification, not the caller's identity, is
+    what makes this endpoint safe to leave unauthenticated."""
+    raw = await request.body()
+    if not billing.verify_webhook_signature(dict(request.headers), raw):
+        logger.warning("rejected a PayPal webhook with an invalid/unverifiable signature")
+        return utils.get_response(400, message="invalid signature")
+    import json as _json
+
+    try:
+        event = _json.loads(raw)
+    except Exception:  # noqa: BLE001
+        return utils.get_response(400, message="invalid payload")
+    billing.handle_webhook_event(event)
+    return utils.get_response(200, {"received": True})

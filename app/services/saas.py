@@ -35,6 +35,7 @@ from loguru import logger
 from app.config import config
 from app.models import const
 from app.models.schema import MaterialInfo, VideoParams
+from app.services import billing
 from app.services import clips
 from app.services import firestore_db
 from app.services import llm
@@ -50,10 +51,17 @@ from app.utils import utils
 # also removes the Download button from that job's card.
 DELETE_AFTER_PUBLISH = os.getenv("MPT_DELETE_AFTER_PUBLISH", "").strip().lower() in ("1", "true", "yes")
 
-# Auto Mode belongs where rendering is free: the machine running the engine
-# in-process. On Cloud Run the service only dispatches jobs, so every
-# auto-generated video costs money - the button is hidden there and the
-# endpoint refuses to turn it on. MPT_ALLOW_AUTO_MODE overrides either way.
+# Auto Mode is free on the local desktop app - Sam's own machine, Sam's own
+# electricity. On the live site it needs an active $29/mo PayPal subscription
+# (see app/services/billing.py) - unlocking the *ability* to use it, not
+# making its videos free; each one still spends a credit like manual
+# generation does. This used to be a single global flag keyed off whether
+# rendering dispatched to a Cloud Run job, which broke once the live site
+# moved to cPanel and started rendering in-process just like local does -
+# billing.live_billing_enabled() (keyed off the data backend: sqlite is only
+# ever local, mysql/postgres are only ever a real hosted deployment) is the
+# signal that's actually still true post-migration. MPT_ALLOW_AUTO_MODE
+# overrides either way, mainly for testing the live-site path locally.
 _allow_auto = os.getenv("MPT_ALLOW_AUTO_MODE", "").strip().lower()
 
 # Even locally, generation needs a ceiling. The engine loop generates whenever
@@ -63,12 +71,20 @@ AUTO_DAILY_LIMIT = max(0, int(os.getenv("MPT_AUTO_DAILY_LIMIT", "3")))
 _auto_quota = {"day": "", "count": 0}
 
 
-def auto_mode_available() -> bool:
+def auto_mode_available(uid: str = None) -> bool:
     if _allow_auto in ("1", "true", "yes"):
         return True
     if _allow_auto in ("0", "false", "no"):
         return False
-    return not render_dispatch.enabled()
+    if not billing.live_billing_enabled():
+        return True
+    if uid is None:
+        # No specific user in context (e.g. an admin-only global status
+        # view) - nothing to check a subscription against, so default to
+        # "not available" rather than leaking a stale global answer.
+        return False
+    user = firestore_db.get_user(uid)
+    return bool((user or {}).get("auto_mode_subscription_active"))
 
 STATUS_PENDING = "pending"
 STATUS_PROCESSING = "processing"
@@ -735,7 +751,7 @@ class Engine:
     def auto_killed(self) -> bool:
         return firestore_db.get_engine_state()["auto_killed"]
 
-    def status(self) -> dict:
+    def status(self, uid: str = None) -> dict:
         state = firestore_db.get_engine_state()
         processing = firestore_db.list_processing_jobs()
         return {
@@ -743,7 +759,7 @@ class Engine:
             "paused": state["paused"],
             "auto_killed": state["auto_killed"],
             "workers": self.NUM_WORKERS,
-            "auto_available": auto_mode_available(),
+            "auto_available": auto_mode_available(uid),
             "processing_count": len(processing),
             "processing_jobs": [
                 {"job_id": j.get("id"), "uid": j.get("uid"), "title": j.get("title", "")} for j in processing
@@ -795,8 +811,6 @@ class Engine:
             self._wake.clear()
 
     def _auto_generate(self, worker_id: str) -> bool:
-        if not auto_mode_available():
-            return False
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if _auto_quota["day"] != today:
             _auto_quota.update(day=today, count=0)
@@ -813,6 +827,19 @@ class Engine:
             # moves on to someone else rather than sticking here.
             logger.info(f"auto-mode skipped for {uid}: rendering is disabled")
             return False
+        # Per-user now, not a blanket deployment check - see auto_mode_available's
+        # docstring-equivalent comment above. On the live site this means "no
+        # active $29/mo subscription"; locally it's always True.
+        if not auto_mode_available(uid):
+            logger.info(f"auto-mode skipped for {uid}: Auto Mode is not available for this account")
+            return False
+        # Live site only - the local desktop app never spends credits. Reserved
+        # here, before generation even starts, exactly like manual generation
+        # reserves at queue time (app/controllers/v1/saas.py's gate sites).
+        live = billing.live_billing_enabled()
+        if live and not firestore_db.reserve_credits(uid, 1):
+            logger.info(f"auto-mode skipped for {uid}: insufficient credits")
+            return False
         try:
             with _user_config_scope(uid) as profile:
                 job = generate_viral_job(uid, profile)
@@ -823,8 +850,26 @@ class Engine:
             )
             return True
         except Exception as e:  # noqa: BLE001 - keep the loop alive on any failure
+            # generate_viral_job creates the job as its LAST step (after LLM
+            # script generation), so reaching here means no job was ever
+            # created - refund now. If a job *was* created, control returns
+            # True above instead, and any render failure later is refunded by
+            # _process's own failure path, not here - never both.
+            if live:
+                firestore_db.refund_credits(uid, 1)
             logger.error(f"auto-mode generation failed for {uid}: {e}")
             return False
+
+    def _refund_job_credit(self, uid: str, job_id: str) -> None:
+        """Every job - manual, retried, auto-generated, or one clip out of a
+        batch - spends exactly 1 credit at queue time (queue_clip_jobs
+        reserves a whole batch in one call, but that's N x "1 credit per
+        job about to exist", not a lump sum tied to the batch). A no-op on
+        the local desktop app, where nothing was ever reserved."""
+        if not billing.live_billing_enabled():
+            return
+        firestore_db.refund_credits(uid, 1)
+        logger.info(f"refunded 1 credit to {uid} for failed job {job_id}")
 
     def _process(self, uid: str, job: dict):
         job_id = job["id"]
@@ -837,6 +882,7 @@ class Engine:
             except Exception as e:  # noqa: BLE001 - keep the loop alive on any failure
                 logger.exception(f"clip job {job_id} crashed")
                 store.update(uid, job_id, status=STATUS_FAILED, error=str(e))
+                self._refund_job_credit(uid, job_id)
             return
 
         task_id = utils.get_uuid()
@@ -848,6 +894,7 @@ class Engine:
         except Exception as e:
             logger.error(f"invalid params for job {job_id}: {e}")
             store.update(uid, job_id, status=STATUS_FAILED, error=f"Invalid parameters: {e}")
+            self._refund_job_credit(uid, job_id)
             return
 
         sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=0)
@@ -885,6 +932,7 @@ class Engine:
             )
             store.update(uid, job_id, status=STATUS_FAILED, error=msg)
             logger.error(f"job {job_id} failed: {msg}")
+            self._refund_job_credit(uid, job_id)
         else:
             urls = _collect_outputs(job_id, task_id, result)
             final_script = result.get("script", "") or job["params"].get("video_script", "")

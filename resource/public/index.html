@@ -192,6 +192,7 @@
     <div class="nav-item" data-view="clips"><span class="ic">✂️</span> Clips</div>
     <div class="nav-item" data-view="profile"><span class="ic">🏢</span> Profile</div>
     <div class="nav-item" data-view="api"><span class="ic">🔌</span> API</div>
+    <div class="nav-item" id="credits-link" data-view="credits" style="display:none"><span class="ic">💳</span> Buy Credits</div>
     <div class="nav-item" id="settings-link" data-view="settings" style="display:none"><span class="ic">⚙</span> Settings</div>
     <a class="nav-item" id="admin-link" href="/admin" style="display:none"><span class="ic">🛡</span> Admin</a>
     <a class="nav-item" href="https://wa.me/639610065666" target="_blank" rel="noopener"><span class="ic">💬</span> Contact Support</a>
@@ -205,6 +206,9 @@
         </div>
       </div>
       <button class="btn sm ghost" id="engine-toggle" style="width:100%;margin-top:12px;justify-content:center;display:none">Pause engine</button>
+    </div>
+    <div id="credits-badge" style="display:none;padding:10px 8px 0;font-size:12px;color:var(--muted);cursor:pointer" data-view="credits">
+      💳 <span style="color:var(--text);font-weight:700" id="credits-count">0</span> credits
     </div>
     <div style="padding:10px 8px 2px;font-size:12px;color:var(--muted);word-break:break-all" id="user-email"></div>
     <a class="btn sm ghost" href="/logout" style="width:100%;margin-top:8px;justify-content:center;box-sizing:border-box">⎋ Log out</a>
@@ -489,6 +493,28 @@
       </div>
     </section>
 
+    <!-- CREDITS -->
+    <section class="view" id="view-credits">
+      <div class="page-head"><div><h2>Buy Credits</h2><p>Each generated video - manual or Auto Mode - spends 1 credit. Failed renders are refunded automatically.</p></div></div>
+
+      <div class="card">
+        <div class="section-title">Your balance</div>
+        <p class="hint"><span style="color:var(--text);font-weight:700;font-size:20px" id="credits-view-balance">0</span> credits remaining</p>
+      </div>
+
+      <div class="card" id="credits-packages-card">
+        <div class="section-title">Packages</div>
+        <p class="hint" id="credits-packages-status">Loading…</p>
+        <div class="grid2" id="credits-packages"></div>
+      </div>
+
+      <div class="card" id="credits-automode-card" style="display:none">
+        <div class="section-title">Auto Mode subscription</div>
+        <p class="hint" id="automode-status-hint">Let AI invent and render viral videos non-stop, unattended. Still spends 1 credit per video from the balance above.</p>
+        <button class="btn primary" id="automode-subscribe-btn">Subscribe — $<span id="automode-price">29</span>/month</button>
+      </div>
+    </section>
+
     <!-- SETTINGS -->
     <section class="view" id="view-settings">
       <div class="page-head"><div><h2>Settings</h2><p>Shared by every account - only visible to the admin.</p></div></div>
@@ -558,6 +584,20 @@
           <div class="field"><label>LinkedIn client secret</label><input id="s-li-secret" placeholder="..." /></div>
         </div>
 
+        <div class="section-title">Payments — PayPal <span class="desc">live site only, no effect on the local app</span></div>
+        <p class="hint">Sandbox mode by default so a fresh deployment never accidentally takes a real payment. Flip to Live only once you've tested the full buy flow with a sandbox buyer account.</p>
+        <div class="grid2">
+          <div class="field"><label>PayPal client ID</label><input id="s-pp-id" placeholder="A..." /></div>
+          <div class="field"><label>PayPal client secret</label><input id="s-pp-secret" placeholder="..." /></div>
+          <div class="field"><label>Mode</label>
+            <select id="s-pp-mode"><option value="sandbox">Sandbox (test payments)</option><option value="live">Live (real payments)</option></select>
+          </div>
+          <div class="field"><label>Auto Mode Billing Plan ID <span class="desc">create once in the PayPal dashboard</span></label><input id="s-pp-plan" placeholder="P-..." /></div>
+          <div class="field"><label>Webhook ID <span class="desc">from PayPal's Webhooks setup page</span></label><input id="s-pp-webhook" placeholder="..." /></div>
+          <div class="field"><label>Price per credit (USD)</label><input id="s-pp-credit-price" type="number" min="0" step="0.01" placeholder="0.75" /></div>
+          <div class="field"><label>Auto Mode price (USD/month)</label><input id="s-pp-automode-price" type="number" min="0" step="0.01" placeholder="29.00" /></div>
+        </div>
+
         <div class="section-title">Email notifications</div>
         <p class="hint">SMTP credentials used to send the welcome email to new users, and a new-signup alert to you. Works with Gmail (use an app password), SendGrid, Mailgun, or any SMTP provider.</p>
         <div class="grid2">
@@ -612,6 +652,7 @@ function show(view){
   if(view==="settings")loadSettings();
   if(view==="profile")loadProfile();
   if(view==="api")loadApiKey();
+  if(view==="credits")loadCredits();
   if(view==="new"){
     if(currentProfile.video_aspect)$("#f-aspect").value=currentProfile.video_aspect;
     if(currentProfile.subtitle_pref==="on")$("#f-subs").checked=true;
@@ -806,6 +847,7 @@ function resetClipTab(){
 
 async function refresh(){
   refreshSocial();
+  if(me.live_billing_enabled)whoami(); // keep credits balance + subscription state current
   try{
     const d=await api("/jobs");
     $("#c-pending").textContent=d.counts.pending||0;
@@ -820,17 +862,24 @@ async function refresh(){
     $("#engine-sub").textContent=paused?"queue is on hold":(auto?"your auto-mode is on":"processing queue");
     $("#engine-toggle").textContent=paused?"Resume engine":"Pause engine";
     // auto-mode button + banner (per-user)
-    // Auto Mode only exists where rendering is free (the local app). On the
-    // hosted site the server reports auto_available:false and the button is
-    // hidden rather than shown-but-broken.
+    // Auto Mode only exists where rendering is free (the local app) or the
+    // user has an active $29/mo subscription (the hosted site). On the
+    // hosted site, an unsubscribed user still sees the button - it prompts
+    // them to subscribe instead of hiding outright.
     const canAuto=!(d.engine&&d.engine.auto_available===false);
+    const needsSub=!!(me.live_billing_enabled&&!me.auto_mode_subscription_active);
     const ab=$("#auto-btn");
     // Explicit value, not "": the stylesheet defaults this button to
     // display:none so it never flashes before the first status arrives, and
     // clearing the inline style would just fall back to that rule.
-    ab.style.display=canAuto?"inline-flex":"none";
-    ab.className="btn"+(auto?" auto-on":"");
-    ab.textContent=auto?"⚡ Auto Mode: ON":"⚡ Auto Mode";
+    ab.style.display=(canAuto||needsSub)?"inline-flex":"none";
+    if(needsSub){
+      ab.className="btn";
+      ab.textContent="⚡ Subscribe for Auto Mode";
+    }else{
+      ab.className="btn"+(auto?" auto-on":"");
+      ab.textContent=auto?"⚡ Auto Mode: ON":"⚡ Auto Mode";
+    }
     $("#auto-banner").style.display=(canAuto&&auto)?"block":"none";
     // jobs list (only re-render if changed, so videos don't reload)
     const sig=JSON.stringify(d.jobs.map(j=>[j.id,j.status,j.progress,(j.videos||[]).length,j.publish||0]))+socialSig;
@@ -874,20 +923,110 @@ $("#engine-toggle").onclick=async()=>{
 };
 
 /* Current user - show email, reveal Admin nav + engine pause control for admins */
+let me={};
 async function whoami(){
   try{
     const r=await fetch("/api/v1/auth/me");
     const j=await r.json();
-    const me=j.data||{};
+    me=j.data||{};
     $("#user-email").textContent=me.email||"";
     if(me.is_admin){
       $("#admin-link").style.display="";
       $("#engine-toggle").style.display="";
       $("#settings-link").style.display="";
     }
+    if(me.live_billing_enabled){
+      $("#credits-badge").style.display="block";
+      $("#credits-link").style.display="";
+      $("#credits-count").textContent=me.credits||0;
+      $("#credits-view-balance").textContent=me.credits||0;
+    }
   }catch(e){}
 }
 whoami();
+
+/* Buy Credits view + Auto Mode subscription (live site only - see billing.py) */
+let paypalSdkPromise=null;
+function loadPaypalSdk(clientId){
+  if(paypalSdkPromise) return paypalSdkPromise;
+  paypalSdkPromise=new Promise((resolve,reject)=>{
+    const s=document.createElement("script");
+    s.src="https://www.paypal.com/sdk/js?client-id="+encodeURIComponent(clientId)+"&currency=USD&intent=capture&vault=true";
+    s.onload=()=>resolve(window.paypal);
+    s.onerror=()=>reject(new Error("Could not load PayPal"));
+    document.head.appendChild(s);
+  });
+  return paypalSdkPromise;
+}
+
+async function loadCredits(){
+  $("#credits-view-balance").textContent=me.credits||0;
+  const statusEl=$("#credits-packages-status");
+  const grid=$("#credits-packages");
+  statusEl.textContent="Loading…";
+  grid.innerHTML="";
+  let d;
+  try{ d=await api("/credits/packages"); }
+  catch(e){ statusEl.textContent="Could not load packages: "+e.message; return; }
+  if(!d.paypal_client_id){
+    statusEl.textContent="Payments aren't configured yet - ask the admin to add PayPal credentials in Settings.";
+    return;
+  }
+  statusEl.textContent="";
+  grid.innerHTML=d.packages.map(p=>`
+    <div class="field" style="background:var(--bg2);border:1px solid var(--border);border-radius:11px;padding:14px">
+      <label style="font-size:15px">${esc(p.label)}</label>
+      <div class="hint" style="margin:2px 0 10px">$${p.price_usd.toFixed(2)}</div>
+      <div id="pp-buy-${esc(p.id)}"></div>
+    </div>`).join("");
+
+  let paypal;
+  try{ paypal=await loadPaypalSdk(d.paypal_client_id); }
+  catch(e){ statusEl.textContent=e.message; return; }
+
+  d.packages.forEach(p=>{
+    paypal.Buttons({
+      style:{layout:"horizontal",height:36,tagline:false},
+      createOrder:()=>api("/credits/checkout",{method:"POST",body:JSON.stringify({package_id:p.id})}).then(r=>r.order_id),
+      onApprove:data=>api("/credits/capture",{method:"POST",body:JSON.stringify({order_id:data.orderID})}).then(res=>{
+        toast(`+${res.credits} credits added`);
+        whoami();
+        loadCredits();
+      }).catch(e=>toast(e.message,"err")),
+      onError:e=>toast("PayPal error - "+(e && e.message || e),"err"),
+    }).render("#pp-buy-"+p.id);
+  });
+
+  const autoCard=$("#credits-automode-card");
+  if(me.auto_mode_subscription_active){
+    autoCard.style.display="";
+    $("#automode-status-hint").textContent="Your Auto Mode subscription is active.";
+    $("#automode-subscribe-btn").style.display="none";
+  }else{
+    autoCard.style.display="";
+    $("#automode-price").textContent=(d.auto_mode_price_usd||29).toFixed(0);
+    $("#automode-subscribe-btn").style.display="";
+  }
+}
+
+$("#automode-subscribe-btn").onclick=async()=>{
+  const btn=$("#automode-subscribe-btn");
+  btn.disabled=true;btn.textContent="Redirecting to PayPal…";
+  try{
+    const d=await api("/automode/subscribe",{method:"POST"});
+    if(!d.approve_url) throw new Error("PayPal did not return an approval link");
+    const w=window.open(d.approve_url,"mpt_paypal_sub","width=560,height=760");
+    if(!w){toast("Allow popups for this site to subscribe","err");return;}
+    const poll=setInterval(()=>{
+      if(w.closed){
+        clearInterval(poll);
+        toast("Confirming your subscription with PayPal - this can take a few seconds…");
+        setTimeout(()=>{whoami();loadCredits();refresh();},4000);
+      }
+    },800);
+  }catch(e){toast(e.message,"err")}
+  finally{btn.disabled=false;btn.textContent="Subscribe — $"+$("#automode-price").textContent+"/month";}
+};
 
 /* Social connect / disconnect */
 async function connectPlatform(p){
@@ -941,6 +1080,10 @@ window.publishJob=async(id,platforms)=>{
 
 /* Auto mode toggle */
 $("#auto-btn").onclick=async()=>{
+  if(me.live_billing_enabled&&!me.auto_mode_subscription_active){
+    show("credits");
+    return;
+  }
   const on=$("#auto-btn").classList.contains("auto-on");
   try{
     await api("/engine/auto/"+(on?"stop":"start"),{method:"POST"});
@@ -1113,6 +1256,13 @@ async function loadSettings(){
     $("#s-fb-secret").value=s.facebook_app_secret||"";
     $("#s-li-id").value=s.linkedin_client_id||"";
     $("#s-li-secret").value=s.linkedin_client_secret||"";
+    $("#s-pp-id").value=s.paypal_client_id||"";
+    $("#s-pp-secret").value=s.paypal_client_secret||"";
+    $("#s-pp-mode").value=s.paypal_mode||"sandbox";
+    $("#s-pp-plan").value=s.paypal_auto_mode_plan_id||"";
+    $("#s-pp-webhook").value=s.paypal_webhook_id||"";
+    $("#s-pp-credit-price").value=s.credit_price_usd??0.75;
+    $("#s-pp-automode-price").value=s.auto_mode_price_usd??29.0;
     const base=(s.publish_base_url||"http://localhost:8080").replace(/\/$/,"");
     $("#s-baseurl").value=base;
     updateRedirects(base);
@@ -1167,6 +1317,13 @@ $("#save-settings").onclick=async()=>{
     facebook_app_secret:$("#s-fb-secret").value.trim(),
     linkedin_client_id:$("#s-li-id").value.trim(),
     linkedin_client_secret:$("#s-li-secret").value.trim(),
+    paypal_client_id:$("#s-pp-id").value.trim(),
+    paypal_client_secret:$("#s-pp-secret").value.trim(),
+    paypal_mode:$("#s-pp-mode").value,
+    paypal_auto_mode_plan_id:$("#s-pp-plan").value.trim(),
+    paypal_webhook_id:$("#s-pp-webhook").value.trim(),
+    credit_price_usd:parseFloat($("#s-pp-credit-price").value)||0.75,
+    auto_mode_price_usd:parseFloat($("#s-pp-automode-price").value)||29.0,
     publish_base_url:$("#s-baseurl").value.trim()||"http://localhost:8080",
     smtp_host:$("#s-smtp-host").value.trim(),
     smtp_port:parseInt($("#s-smtp-port").value,10)||587,

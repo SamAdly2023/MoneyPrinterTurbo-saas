@@ -143,6 +143,12 @@ def _init_schema(conn):
             title      TEXT,
             created_at TEXT
         );
+        CREATE TABLE IF NOT EXISTS processed_payments (
+            payment_id TEXT PRIMARY KEY,
+            uid        TEXT,
+            credits    INTEGER,
+            created_at TEXT
+        );
         """
     )
     conn.commit()
@@ -235,6 +241,113 @@ def set_user_disabled(uid: str, disabled: bool) -> None:
 
 def set_user_admin(uid: str, is_admin: bool) -> None:
     _update_user(uid, {"is_admin": is_admin})
+
+
+# ---------------------------------------------------------------------------
+# Credits (live-site paywall - see app/services/billing.py)
+# ---------------------------------------------------------------------------
+def get_user_credits(uid: str) -> int:
+    user = get_user(uid)
+    return int((user or {}).get("credits", 0))
+
+
+def reserve_credits(uid: str, count: int = 1) -> bool:
+    """Atomically spend `count` credits if the balance covers it, all or
+    nothing - used to reserve credits for a whole batch of clip jobs in one
+    call rather than letting some clips queue and others get rejected
+    mid-batch. BEGIN IMMEDIATE takes the write lock up front, matching
+    reserve_youtube_upload_slot's pattern (a per-user document here, a
+    shared counter document there)."""
+    with _lock:
+        conn = _connect()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute("SELECT data FROM users WHERE uid=?", (uid,)).fetchone()
+            if not row:
+                conn.rollback()
+                return False
+            data = json.loads(row["data"])
+            balance = int(data.get("credits", 0))
+            if balance < count:
+                conn.rollback()
+                return False
+            data["credits"] = balance - count
+            conn.execute("UPDATE users SET data=? WHERE uid=?", (json.dumps(data), uid))
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def refund_credits(uid: str, count: int = 1) -> None:
+    """Called from the render failure path - a queued job reserves credits
+    up front, and this gives them back if the render never delivered."""
+    with _lock:
+        conn = _connect()
+        row = conn.execute("SELECT data FROM users WHERE uid=?", (uid,)).fetchone()
+        if not row:
+            return
+        data = json.loads(row["data"])
+        data["credits"] = int(data.get("credits", 0)) + count
+        conn.execute("UPDATE users SET data=? WHERE uid=?", (json.dumps(data), uid))
+        conn.commit()
+
+
+def add_credits(uid: str, count: int) -> None:
+    """Plain grant - admin top-ups. The PayPal purchase path uses
+    record_payment_if_new instead, which wraps this with idempotency."""
+    with _lock:
+        conn = _connect()
+        row = conn.execute("SELECT data FROM users WHERE uid=?", (uid,)).fetchone()
+        if not row:
+            return
+        data = json.loads(row["data"])
+        data["credits"] = int(data.get("credits", 0)) + count
+        conn.execute("UPDATE users SET data=? WHERE uid=?", (json.dumps(data), uid))
+        conn.commit()
+
+
+def record_payment_if_new(payment_id: str, uid: str, count: int) -> bool:
+    """Grants `count` credits for a PayPal payment exactly once.
+
+    PayPal retries webhooks and a client can replay a capture call, so the
+    insert-into-processed_payments and the credit grant happen in the same
+    transaction: if payment_id is already present, this is a no-op and
+    returns False - the caller (billing.py) uses that to tell an already-
+    processed payment apart from a newly-applied one, without ever risking
+    double-crediting the same payment.
+    """
+    with _lock:
+        conn = _connect()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM processed_payments WHERE payment_id=?", (payment_id,)
+            ).fetchone()
+            if row:
+                conn.rollback()
+                return False
+            conn.execute(
+                "INSERT INTO processed_payments(payment_id, uid, credits, created_at) VALUES(?,?,?,?)",
+                (payment_id, uid, count, _now()),
+            )
+            urow = conn.execute("SELECT data FROM users WHERE uid=?", (uid,)).fetchone()
+            if not urow:
+                conn.rollback()
+                return False
+            data = json.loads(urow["data"])
+            data["credits"] = int(data.get("credits", 0)) + count
+            conn.execute("UPDATE users SET data=? WHERE uid=?", (json.dumps(data), uid))
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def set_auto_mode_subscription(uid: str, active: bool) -> None:
+    _update_user(uid, {"auto_mode_subscription_active": active})
 
 
 # ---------------------------------------------------------------------------

@@ -20,6 +20,12 @@ _PUBLIC_PATHS = {
     "/privacy", "/terms", "/robots.txt", "/sitemap.xml",
     # Anonymous visitor pageview beacon fired from the public marketing pages.
     "/api/v1/track/pageview",
+    # PayPal's server calling us directly - no browser session cookie exists.
+    # Safe to leave unauthenticated because the handler verifies PayPal's
+    # signature on every request before trusting the body (see
+    # billing.verify_webhook_signature) - that check, not a cookie, is what
+    # makes this endpoint trustworthy.
+    "/api/v1/saas/paypal/webhook",
     # TikTok domain-ownership verification file (Developer Portal -> URL properties)
     "/tiktokxb2Qi9CpEIW2FcFuDD6btN9J9HKbErcD.txt",
 }

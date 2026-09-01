@@ -179,6 +179,14 @@ def _init_schema(conn):
                 created_at VARCHAR(64)
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS processed_payments (
+                payment_id VARCHAR(191) PRIMARY KEY,
+                uid        VARCHAR(191),
+                credits    INT,
+                created_at VARCHAR(64)
+            )
+        """)
     conn.commit()
     _seed_global_settings(conn)
 
@@ -284,6 +292,141 @@ def set_user_disabled(uid: str, disabled: bool) -> None:
 
 def set_user_admin(uid: str, is_admin: bool) -> None:
     _update_user(uid, {"is_admin": is_admin})
+
+
+# ---------------------------------------------------------------------------
+# Credits (live-site paywall - see app/services/billing.py)
+# ---------------------------------------------------------------------------
+def get_user_credits(uid: str) -> int:
+    user = get_user(uid)
+    return int((user or {}).get("credits", 0))
+
+
+def reserve_credits(uid: str, count: int = 1) -> bool:
+    """Atomically spend `count` credits if the balance covers it, all or
+    nothing - used to reserve credits for a whole batch of clip jobs in one
+    call rather than letting some clips queue and others get rejected
+    mid-batch. SELECT ... FOR UPDATE locks the row for the transaction,
+    matching reserve_youtube_upload_slot's pattern (a per-user row here, a
+    shared counter row there)."""
+    with _lock:
+        conn = _connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT data::text AS data FROM users WHERE uid=%s FOR UPDATE", (uid,)
+                )
+                row = cur.fetchone()
+                if not row:
+                    conn.rollback()
+                    return False
+                data = json.loads(row["data"])
+                balance = int(data.get("credits", 0))
+                if balance < count:
+                    conn.rollback()
+                    return False
+                data["credits"] = balance - count
+                cur.execute(
+                    "UPDATE users SET data=%s::jsonb WHERE uid=%s", (json.dumps(data), uid)
+                )
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def refund_credits(uid: str, count: int = 1) -> None:
+    """Called from the render failure path - a queued job reserves credits
+    up front, and this gives them back if the render never delivered."""
+    with _lock:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("SELECT data::text AS data FROM users WHERE uid=%s", (uid,))
+            row = cur.fetchone()
+            if not row:
+                return
+            data = json.loads(row["data"])
+            data["credits"] = int(data.get("credits", 0)) + count
+            cur.execute(
+                "UPDATE users SET data=%s::jsonb WHERE uid=%s", (json.dumps(data), uid)
+            )
+        conn.commit()
+
+
+def add_credits(uid: str, count: int) -> None:
+    """Plain grant - admin top-ups. The PayPal purchase path uses
+    record_payment_if_new instead, which wraps this with idempotency."""
+    with _lock:
+        conn = _connect()
+        with conn.cursor() as cur:
+            cur.execute("SELECT data::text AS data FROM users WHERE uid=%s", (uid,))
+            row = cur.fetchone()
+            if not row:
+                return
+            data = json.loads(row["data"])
+            data["credits"] = int(data.get("credits", 0)) + count
+            cur.execute(
+                "UPDATE users SET data=%s::jsonb WHERE uid=%s", (json.dumps(data), uid)
+            )
+        conn.commit()
+
+
+def record_payment_if_new(payment_id: str, uid: str, count: int) -> bool:
+    """Grants `count` credits for a PayPal payment exactly once.
+
+    PayPal retries webhooks and a client can replay a capture call, so the
+    insert-into-processed_payments and the credit grant happen in the same
+    transaction: if payment_id is already present, this is a no-op and
+    returns False - the caller (billing.py) uses that to tell an already-
+    processed payment apart from a newly-applied one, without ever risking
+    double-crediting the same payment.
+    """
+    with _lock:
+        conn = _connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM processed_payments WHERE payment_id=%s FOR UPDATE",
+                    (payment_id,),
+                )
+                if cur.fetchone():
+                    conn.rollback()
+                    return False
+                try:
+                    cur.execute(
+                        "INSERT INTO processed_payments(payment_id, uid, credits, created_at) "
+                        "VALUES(%s,%s,%s,%s)",
+                        (payment_id, uid, count, _now()),
+                    )
+                except psycopg2.IntegrityError:
+                    # Lost a tight race to another request for the same payment_id -
+                    # the PRIMARY KEY constraint is the real backstop the FOR UPDATE
+                    # check above only narrows; treat this exactly like "already
+                    # processed" rather than surfacing a raw DB error.
+                    conn.rollback()
+                    return False
+                cur.execute(
+                    "SELECT data::text AS data FROM users WHERE uid=%s FOR UPDATE", (uid,)
+                )
+                urow = cur.fetchone()
+                if not urow:
+                    conn.rollback()
+                    return False
+                data = json.loads(urow["data"])
+                data["credits"] = int(data.get("credits", 0)) + count
+                cur.execute(
+                    "UPDATE users SET data=%s::jsonb WHERE uid=%s", (json.dumps(data), uid)
+                )
+            conn.commit()
+            return True
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def set_auto_mode_subscription(uid: str, active: bool) -> None:
+    _update_user(uid, {"auto_mode_subscription_active": active})
 
 
 # ---------------------------------------------------------------------------

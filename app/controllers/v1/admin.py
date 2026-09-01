@@ -67,6 +67,16 @@ def _settings_response(settings: dict) -> dict:
         "facebook_app_secret": settings.get("facebook_app_secret", ""),
         "linkedin_client_id": settings.get("linkedin_client_id", ""),
         "linkedin_client_secret": settings.get("linkedin_client_secret", ""),
+        # Payments (live site only - see app/services/billing.py). Sandbox
+        # by default so a fresh deployment never accidentally takes real
+        # payments before someone deliberately flips it to "live".
+        "paypal_client_id": settings.get("paypal_client_id", ""),
+        "paypal_client_secret": settings.get("paypal_client_secret", ""),
+        "paypal_mode": settings.get("paypal_mode", "sandbox"),
+        "paypal_auto_mode_plan_id": settings.get("paypal_auto_mode_plan_id", ""),
+        "paypal_webhook_id": settings.get("paypal_webhook_id", ""),
+        "credit_price_usd": settings.get("credit_price_usd", 0.75),
+        "auto_mode_price_usd": settings.get("auto_mode_price_usd", 29.0),
         "publish_base_url": settings.get("publish_base_url", "http://localhost:8080"),
         "replicate_api_token": settings.get("replicate_api_token", ""),
         "avatar_image_path": settings.get("avatar_image_path", ""),
@@ -113,6 +123,13 @@ class SettingsBody(BaseModel):
     facebook_app_secret: Optional[str] = None
     linkedin_client_id: Optional[str] = None
     linkedin_client_secret: Optional[str] = None
+    paypal_client_id: Optional[str] = None
+    paypal_client_secret: Optional[str] = None
+    paypal_mode: Optional[str] = None
+    paypal_auto_mode_plan_id: Optional[str] = None
+    paypal_webhook_id: Optional[str] = None
+    credit_price_usd: Optional[float] = None
+    auto_mode_price_usd: Optional[float] = None
     publish_base_url: Optional[str] = None
     replicate_api_token: Optional[str] = None
     smtp_host: Optional[str] = None
