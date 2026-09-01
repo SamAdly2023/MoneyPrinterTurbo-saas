@@ -74,6 +74,12 @@ fps = 30
 # 卡顿或最后一小段旁白没有画面的情况。
 _VIDEO_DURATION_SAFETY_MARGIN = 0.1
 _BGM_EXTENSIONS = (".mp3",)
+# moviepy leaves ffmpeg's preset at its own default ("medium"), which spends
+# far more CPU time than a Short's target bitrate needs. "veryfast" trades a
+# small amount of compression efficiency for a large cut in encode time -
+# YouTube/TikTok re-encode on upload anyway, so the slightly larger file this
+# produces doesn't carry through to what viewers see.
+_ENCODE_PRESET = "veryfast"
 _DEFAULT_VIDEO_CODEC = "libx264"
 _SUPPORTED_VIDEO_CODECS = (
     "libx264",
@@ -333,6 +339,8 @@ def concat_video_clips_with_ffmpeg(
             concat_list_file,
             "-c:v",
             codec,
+            "-preset",
+            _ENCODE_PRESET,
             "-threads",
             str(threads or 2),
             "-pix_fmt",
@@ -724,6 +732,7 @@ def combine_videos(
                 codec=_get_configured_video_codec(),
                 logger=None,
                 fps=fps,
+                preset=_ENCODE_PRESET,
             )
 
             # Store clip duration before closing
@@ -822,6 +831,7 @@ def fit_single_clip_to_aspect(source_path: str, output_path: str, video_aspect: 
                 fitted = CompositeVideoClip([background, resized])
         _write_videofile_with_codec_fallback(
             fitted, output_path, codec=_get_configured_video_codec(), logger=None, fps=fps,
+            preset=_ENCODE_PRESET,
         )
     finally:
         close_clip(clip)
@@ -1235,6 +1245,7 @@ def generate_video(
         threads=params.n_threads or 2,
         logger=None,
         fps=fps,
+        preset=_ENCODE_PRESET,
     )
     video_clip.close()
     del video_clip
@@ -1321,7 +1332,7 @@ def preprocess_video(materials: List[MaterialInfo], clip_duration=4):
 
                 # Output the video to a file.
                 video_file = f"{material_source_path}.mp4"
-                final_clip.write_videofile(video_file, fps=30, logger=None)
+                final_clip.write_videofile(video_file, fps=30, logger=None, preset=_ENCODE_PRESET)
                 close_clip(clip)
                 close_clip(final_clip)
                 material.url = video_file
