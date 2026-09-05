@@ -36,7 +36,7 @@ from pydantic import BaseModel
 
 from app.controllers.v1.base import new_router
 from app.models.schema import MaterialInfo, VideoParams
-from app.services import auth, billing, clips, firestore_db, llm, publish, saas
+from app.services import auth, billing, clips, firestore_db, llm, publish, replay, saas
 from app.utils import utils
 
 router = new_router()
@@ -1056,3 +1056,128 @@ async def paypal_webhook(request: Request):
         return utils.get_response(400, message="invalid payload")
     billing.handle_webhook_event(event)
     return utils.get_response(200, {"received": True})
+
+
+# --------------------------------------------------------------------------- #
+# 24/7 Replay Channel - simulated looped playback of the user's own videos,
+# framed against their real YouTube connection (see app/services/replay.py).
+# No real RTMP/YouTube Live API calls are made anywhere below.
+# --------------------------------------------------------------------------- #
+@router.get("/saas/replay/sources", summary="List this user's finished videos as replay-channel sources")
+def replay_sources(request: Request):
+    uid = _uid(request)
+    return utils.get_response(200, {"sources": replay.list_sources(uid)})
+
+
+@router.post("/saas/replay/upload", summary="Upload a fresh video to use as a replay-channel source")
+def replay_upload(request: Request, file: UploadFile = File(...)):
+    uid = _uid(request)
+    try:
+        result = replay.save_replay_upload(uid, file)
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    return utils.get_response(200, result)
+
+
+@router.get("/saas/replay/channels", summary="List this user's replay channels")
+def replay_list_channels(request: Request):
+    uid = _uid(request)
+    return utils.get_response(200, {"channels": replay.list_channels(uid)})
+
+
+class ReplayChannelBody(BaseModel):
+    name: str
+    source_kind: str  # "job" | "upload"
+    source_ref: str  # job_id or video_url
+    replay_mode: Optional[str] = "loop"
+    output_format: Optional[str] = "9:16"
+    layout: Optional[str] = "spotlight"
+
+
+@router.post("/saas/replay/channels", summary="Create a replay channel")
+def replay_create_channel(request: Request, body: ReplayChannelBody):
+    uid = _uid(request)
+    try:
+        channel = replay.create_channel(
+            uid, body.name, body.source_kind, body.source_ref,
+            replay_mode=body.replay_mode, output_format=body.output_format, layout=body.layout,
+        )
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    return utils.get_response(200, channel)
+
+
+@router.get("/saas/replay/channels/{channel_id}", summary="Get one replay channel")
+def replay_get_channel(request: Request, channel_id: str = Path(...)):
+    uid = _uid(request)
+    channel = replay.get_channel(uid, channel_id)
+    if not channel:
+        return utils.get_response(404, message="channel not found")
+    return utils.get_response(200, channel)
+
+
+class ReplayChannelUpdateBody(BaseModel):
+    name: Optional[str] = None
+    replay_mode: Optional[str] = None
+    output_format: Optional[str] = None
+    layout: Optional[str] = None
+
+
+@router.post("/saas/replay/channels/{channel_id}/update", summary="Update a replay channel's settings")
+def replay_update_channel(request: Request, body: ReplayChannelUpdateBody, channel_id: str = Path(...)):
+    uid = _uid(request)
+    try:
+        channel = replay.update_channel(uid, channel_id, **body.model_dump())
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    return utils.get_response(200, channel)
+
+
+@router.delete("/saas/replay/channels/{channel_id}", summary="Delete a replay channel")
+def replay_delete_channel(request: Request, channel_id: str = Path(...)):
+    uid = _uid(request)
+    try:
+        replay.delete_channel(uid, channel_id)
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    return utils.get_response(200, {"deleted": channel_id})
+
+
+@router.post("/saas/replay/channels/{channel_id}/go-live", summary="Start a simulated 24/7 replay broadcast")
+def replay_go_live(request: Request, channel_id: str = Path(...)):
+    uid = _uid(request)
+    try:
+        channel = replay.go_live(uid, channel_id)
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    return utils.get_response(200, channel)
+
+
+@router.post("/saas/replay/channels/{channel_id}/pause", summary="Pause a live replay channel")
+def replay_pause(request: Request, channel_id: str = Path(...)):
+    uid = _uid(request)
+    try:
+        channel = replay.pause(uid, channel_id)
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    return utils.get_response(200, channel)
+
+
+@router.post("/saas/replay/channels/{channel_id}/resume", summary="Resume a paused replay channel")
+def replay_resume(request: Request, channel_id: str = Path(...)):
+    uid = _uid(request)
+    try:
+        channel = replay.resume(uid, channel_id)
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    return utils.get_response(200, channel)
+
+
+@router.post("/saas/replay/channels/{channel_id}/stop", summary="Stop a live/paused replay channel")
+def replay_stop(request: Request, channel_id: str = Path(...)):
+    uid = _uid(request)
+    try:
+        channel = replay.stop(uid, channel_id)
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    return utils.get_response(200, channel)

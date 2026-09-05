@@ -48,6 +48,9 @@ DEFAULT_PROFILE = {
     "logo_path": "",
     "use_logo": False,
     "avatar_image_path": "",
+    # 24/7 Replay Channel - a simulated, timestamp-based looped-playback demo
+    # layered on top of the real YouTube connection (see app/services/replay.py).
+    "replay_channels": [],
 }
 
 DEFAULT_GLOBAL_SETTINGS = {
@@ -172,10 +175,18 @@ def _seed_global_settings(conn):
 
 
 def _get_doc(table: str, key_col: str, key: str) -> dict | None:
-    row = _connect().execute(
-        f"SELECT data FROM {table} WHERE {key_col}=?", (key,)
-    ).fetchone()
-    return json.loads(row["data"]) if row else None
+    # Locked even for a read: sqlite3's Connection isn't safe for two threads
+    # calling .execute() on it at the same instant even with
+    # check_same_thread=False (that flag only lifts the same-thread
+    # requirement, not thread-safety) - this is exactly what both engine
+    # worker threads do simultaneously on startup, polling engine state at
+    # the same moment, and it previously crashed one of them outright with
+    # "sqlite3.InterfaceError: bad parameter or other API misuse".
+    with _lock:
+        row = _connect().execute(
+            f"SELECT data FROM {table} WHERE {key_col}=?", (key,)
+        ).fetchone()
+        return json.loads(row["data"]) if row else None
 
 
 # ---------------------------------------------------------------------------

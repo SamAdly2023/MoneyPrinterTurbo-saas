@@ -47,6 +47,9 @@ DEFAULT_PROFILE = {
     # AI talking-avatar presenter photo (see app/services/avatar.py) - falls
     # back to the admin's platform-wide default photo when unset.
     "avatar_image_path": "",
+    # 24/7 Replay Channel - a simulated, timestamp-based looped-playback demo
+    # layered on top of the real YouTube connection (see app/services/replay.py).
+    "replay_channels": [],
 }
 
 DEFAULT_GLOBAL_SETTINGS = {

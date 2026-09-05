@@ -190,6 +190,7 @@
     <div class="nav-item active" data-view="dashboard"><span class="ic">▦</span> Dashboard</div>
     <div class="nav-item" data-view="new"><span class="ic">✎</span> New Script</div>
     <div class="nav-item" data-view="clips"><span class="ic">✂️</span> Clips</div>
+    <div class="nav-item" data-view="replay"><span class="ic">📡</span> Replay Channels</div>
     <div class="nav-item" data-view="profile"><span class="ic">🏢</span> Profile</div>
     <div class="nav-item" data-view="api"><span class="ic">🔌</span> API</div>
     <div class="nav-item" id="credits-link" data-view="credits" style="display:none"><span class="ic">💳</span> Buy Credits</div>
@@ -367,6 +368,93 @@
         <div class="form-actions">
           <button class="btn primary" id="clip-queue-btn">Queue selected clips</button>
           <button class="btn ghost" id="clip-cancel-btn">Start over</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- REPLAY CHANNELS -->
+    <section class="view" id="view-replay">
+      <div class="page-head"><div><h2>Replay Channels</h2><p>Loop one of your videos as a simulated 24/7 stream, framed against your real YouTube connection.</p></div></div>
+      <p class="hint" style="margin:-10px 0 20px">Demo/simulated playback for your own reference — no real RTMP or YouTube Live broadcast is sent, and it does not guarantee YouTube watch-hour eligibility (that depends on YouTube's own policies, content, and traffic).</p>
+
+      <div class="card" id="replay-new-card">
+        <div class="section-title">New Channel</div>
+        <div class="field"><label>Name</label><input id="replay-name" placeholder="My First Stream" /></div>
+        <div class="field">
+          <label>Source video</label>
+          <div style="display:flex;gap:10px;margin-bottom:10px">
+            <button class="btn sm" id="replay-src-tab-job" type="button">From my videos</button>
+            <button class="btn sm ghost" id="replay-src-tab-upload" type="button">Upload a video</button>
+          </div>
+          <select id="replay-source-job"></select>
+          <div id="replay-source-upload-wrap" style="display:none">
+            <input type="file" id="replay-upload-file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,.mp4,.mov,.mkv,.webm,.m4v" />
+            <button class="btn sm" id="replay-upload-btn" type="button" style="margin-left:8px">Upload</button>
+            <p class="hint" id="replay-upload-status"></p>
+          </div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label>Replay mode</label>
+            <select id="replay-mode"><option value="loop">Loop continuously</option><option value="once">Play once, then stop</option></select></div>
+          <div class="field"><label>Output format</label>
+            <select id="replay-format"><option value="9:16">Portrait 9:16</option><option value="16:9">Landscape 16:9</option><option value="1:1">Square 1:1</option></select></div>
+        </div>
+        <div class="field"><label>Layout</label>
+          <select id="replay-layout"><option value="spotlight">Spotlight</option><option value="speaker">Speaker</option><option value="grid">Grid</option></select></div>
+        <div class="form-actions"><button class="btn primary" id="replay-create-btn">Create channel</button></div>
+      </div>
+
+      <div id="replay-channels"></div>
+    </section>
+
+    <!-- LIVE STUDIO -->
+    <section class="view" id="view-replay-studio">
+      <div class="page-head">
+        <div><h2 id="studio-name">Live Studio</h2><p>Demo broadcast — simulated 24/7 loop playback, not a real YouTube Live stream.</p></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <span class="pill" id="studio-status-pill">Idle</span>
+          <button class="btn ghost sm" data-view="replay">← Channels</button>
+        </div>
+      </div>
+
+      <div class="grid2" style="align-items:start">
+        <div class="card">
+          <div style="position:relative;max-width:360px;margin:0 auto">
+            <video id="studio-player" muted playsinline controls style="width:100%;aspect-ratio:9/16;border-radius:12px;background:#000"></video>
+            <div id="studio-overlay" style="position:absolute;top:10px;left:10px;background:rgba(0,0,0,.6);color:#fff;padding:5px 10px;border-radius:999px;font-size:12px;font-weight:700;display:none"></div>
+          </div>
+          <div class="form-actions" style="justify-content:center;margin-top:16px">
+            <button class="btn primary" id="studio-golive-btn">⚡ Go Live</button>
+            <button class="btn" id="studio-pause-btn" style="display:none">⏸ Pause</button>
+            <button class="btn" id="studio-resume-btn" style="display:none">▶ Resume</button>
+            <button class="btn danger" id="studio-stop-btn" style="display:none">⏹ Stop</button>
+          </div>
+          <p class="hint" id="studio-golive-hint" style="text-align:center"></p>
+        </div>
+
+        <div>
+          <div class="card">
+            <div class="section-title">Format &amp; layout</div>
+            <div class="grid2">
+              <div class="field"><label>Output format</label>
+                <select id="studio-format"><option value="9:16">Portrait 9:16</option><option value="16:9">Landscape 16:9</option><option value="1:1">Square 1:1</option></select></div>
+              <div class="field"><label>Layout</label>
+                <select id="studio-layout"><option value="spotlight">Spotlight</option><option value="speaker">Speaker</option><option value="grid">Grid</option></select></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="section-title">Destination</div>
+            <p class="hint" id="studio-destination"></p>
+            <button class="btn sm" id="studio-connect-yt-btn" style="display:none">▶ Connect YouTube</button>
+          </div>
+          <div class="card" id="studio-summary-card" style="display:none">
+            <div class="section-title">Last session summary</div>
+            <p class="hint" id="studio-summary-text"></p>
+          </div>
+          <div class="card">
+            <div class="section-title">Status</div>
+            <p class="hint">Elapsed: <span id="studio-elapsed">00:00</span> · Loop <span id="studio-loop">1</span> · <span id="studio-source-name"></span></p>
+          </div>
         </div>
       </div>
     </section>
@@ -653,6 +741,8 @@ function show(view){
   if(view==="profile")loadProfile();
   if(view==="api")loadApiKey();
   if(view==="credits")loadCredits();
+  if(view==="replay")loadReplayChannels();
+  if(view!=="replay-studio")stopStudioPoll();
   if(view==="new"){
     if(currentProfile.video_aspect)$("#f-aspect").value=currentProfile.video_aspect;
     if(currentProfile.subtitle_pref==="on")$("#f-subs").checked=true;
@@ -1028,6 +1118,208 @@ $("#automode-subscribe-btn").onclick=async()=>{
   finally{btn.disabled=false;btn.textContent="Subscribe — $"+$("#automode-price").textContent+"/month";}
 };
 
+/* 24/7 Replay Channels - simulated looped playback (see app/services/replay.py) */
+const REPLAY_STATUS_META={
+  idle:{cls:"pending",label:"Idle"},
+  live:{cls:"processing",label:"🔴 Live"},
+  paused:{cls:"pending",label:"⏸ Paused"},
+  ended:{cls:"done",label:"Ended"},
+};
+let currentChannelId=null;
+let replaySourcesCache=[];
+let replayUploadedSource=null; // {video_url, duration_seconds} once uploaded
+let studioPollTimer=null;
+
+$("#replay-src-tab-job").onclick=()=>{
+  $("#replay-src-tab-job").classList.remove("ghost");
+  $("#replay-src-tab-upload").classList.add("ghost");
+  $("#replay-source-job").style.display="";
+  $("#replay-source-upload-wrap").style.display="none";
+};
+$("#replay-src-tab-upload").onclick=()=>{
+  $("#replay-src-tab-upload").classList.remove("ghost");
+  $("#replay-src-tab-job").classList.add("ghost");
+  $("#replay-source-job").style.display="none";
+  $("#replay-source-upload-wrap").style.display="block";
+};
+
+async function loadReplayChannels(){
+  try{
+    const sd=await api("/replay/sources");
+    replaySourcesCache=sd.sources||[];
+    $("#replay-source-job").innerHTML=replaySourcesCache.length
+      ? replaySourcesCache.map(s=>`<option value="${esc(s.job_id)}">${esc(s.title)} (${fmtDate(s.created_at)})</option>`).join("")
+      : `<option value="">No finished videos yet - render one first, or upload instead</option>`;
+  }catch(e){/* ignore */}
+  try{
+    const cd=await api("/replay/channels");
+    renderReplayChannels(cd.channels||[]);
+  }catch(e){toast(e.message,"err")}
+}
+
+function renderReplayChannels(channels){
+  const box=$("#replay-channels");
+  if(!channels.length){box.innerHTML=`<div class="empty"><div class="big">📡</div><div>No replay channels yet. Create one above from a finished video.</div></div>`;return;}
+  box.innerHTML=channels.map(c=>{
+    const m=REPLAY_STATUS_META[c.status]||REPLAY_STATUS_META.idle;
+    return `<div class="job">
+      <div class="top">
+        <div>
+          <p class="title">${esc(c.name)}</p>
+          <div class="meta">${esc(c.output_format)} · ${esc(c.layout)} · ${c.replay_mode==="loop"?"loop":"play once"}</div>
+        </div>
+        <span class="pill ${m.cls}">${m.label}</span>
+      </div>
+      <div class="actions">
+        <button class="btn sm" onclick="openReplayStudio('${c.id}')">🎬 Open Studio</button>
+        <button class="btn sm danger" onclick="deleteReplayChannel('${c.id}')">🗑 Delete</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+$("#replay-upload-btn").onclick=async()=>{
+  const fileInput=$("#replay-upload-file");
+  if(!fileInput.files.length){toast("Choose a video file first","err");return;}
+  const btn=$("#replay-upload-btn");btn.disabled=true;btn.textContent="Uploading…";
+  $("#replay-upload-status").textContent="";
+  try{
+    const fd=new FormData();fd.append("file",fileInput.files[0]);
+    const r=await fetch(API+"/replay/upload",{method:"POST",body:fd});
+    const j=await r.json();
+    if(!r.ok||(j.status&&j.status>=400))throw new Error(j.message||"upload failed");
+    replayUploadedSource=j.data;
+    $("#replay-upload-status").textContent=`Ready - ${Math.round(replayUploadedSource.duration_seconds)}s`;
+    toast("Video uploaded");
+  }catch(e){toast(e.message,"err")}
+  finally{btn.disabled=false;btn.textContent="Upload";}
+};
+
+$("#replay-create-btn").onclick=async()=>{
+  const name=$("#replay-name").value.trim()||"My First Stream";
+  const usingUpload=$("#replay-source-upload-wrap").style.display!=="none";
+  let source_kind,source_ref;
+  if(usingUpload){
+    if(!replayUploadedSource){toast("Upload a video first","err");return;}
+    source_kind="upload";source_ref=replayUploadedSource.video_url;
+  }else{
+    source_kind="job";source_ref=$("#replay-source-job").value;
+    if(!source_ref){toast("Pick a video first","err");return;}
+  }
+  const btn=$("#replay-create-btn");btn.disabled=true;btn.textContent="Creating…";
+  try{
+    await api("/replay/channels",{method:"POST",body:JSON.stringify({
+      name, source_kind, source_ref,
+      replay_mode:$("#replay-mode").value,
+      output_format:$("#replay-format").value,
+      layout:$("#replay-layout").value,
+    })});
+    toast("Channel created");
+    $("#replay-name").value="";
+    replayUploadedSource=null;
+    $("#replay-upload-status").textContent="";
+    loadReplayChannels();
+  }catch(e){toast(e.message,"err")}
+  finally{btn.disabled=false;btn.textContent="Create channel";}
+};
+
+window.deleteReplayChannel=async(id)=>{
+  if(!confirm("Delete this replay channel?"))return;
+  try{await api("/replay/channels/"+id,{method:"DELETE"});toast("Deleted");loadReplayChannels();}
+  catch(e){toast(e.message,"err")}
+};
+
+window.openReplayStudio=(id)=>{
+  currentChannelId=id;
+  show("replay-studio");
+  refreshStudio();
+  stopStudioPoll();
+  studioPollTimer=setInterval(refreshStudio,5000);
+};
+function stopStudioPoll(){if(studioPollTimer){clearInterval(studioPollTimer);studioPollTimer=null;}}
+
+function fmtElapsed(sec){
+  sec=Math.max(0,Math.round(sec||0));
+  const m=Math.floor(sec/60),s=sec%60;
+  return String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
+}
+
+async function refreshStudio(){
+  if(!currentChannelId)return;
+  let c;
+  try{c=await api("/replay/channels/"+currentChannelId);}
+  catch(e){toast(e.message,"err");return;}
+
+  $("#studio-name").textContent=c.name;
+  const m=REPLAY_STATUS_META[c.status]||REPLAY_STATUS_META.idle;
+  $("#studio-status-pill").className="pill "+m.cls;
+  $("#studio-status-pill").textContent=m.label;
+
+  const player=$("#studio-player");
+  if(player.dataset.src!==c.source_video_url){
+    player.src=c.source_video_url;
+    player.loop=(c.replay_mode==="loop");
+    player.dataset.src=c.source_video_url;
+  }
+  const overlay=$("#studio-overlay");
+  const live=c.status==="live"||c.status==="paused";
+  overlay.style.display=live?"block":"none";
+  overlay.textContent=c.status==="live"?`🔴 SIMULATED LIVE · Loop ${c.loop_count}`:c.status==="paused"?"⏸ Paused":"";
+
+  $("#studio-golive-btn").style.display=(c.status==="idle"||c.status==="ended")?"":"none";
+  $("#studio-pause-btn").style.display=(c.status==="live")?"":"none";
+  $("#studio-resume-btn").style.display=(c.status==="paused")?"":"none";
+  $("#studio-stop-btn").style.display=(c.status==="live"||c.status==="paused")?"":"none";
+
+  $("#studio-format").value=c.output_format;$("#studio-format").disabled=live;
+  $("#studio-layout").value=c.layout;$("#studio-layout").disabled=live;
+
+  const yt=social.youtube||{connected:false};
+  $("#studio-connect-yt-btn").style.display=yt.connected?"none":"";
+  $("#studio-destination").textContent=yt.connected
+    ? `Connected — ${yt.channel||"your YouTube channel"}`
+    : "Not connected. Connect YouTube to enable Go Live.";
+  $("#studio-golive-hint").textContent=yt.connected?"":"Connect YouTube before going live.";
+
+  $("#studio-elapsed").textContent=fmtElapsed(c.elapsed_seconds);
+  $("#studio-loop").textContent=c.loop_count;
+  $("#studio-source-name").textContent=c.output_format+" · "+c.layout;
+
+  if(c.status==="ended"&&c.session&&c.session.ended_reason){
+    $("#studio-summary-card").style.display="";
+    $("#studio-summary-text").textContent=`Ran for ${fmtElapsed(c.elapsed_seconds)}, ${c.loop_count} loop(s), to ${c.session.destination_label||"YouTube"}. (${c.session.ended_reason==="completed"?"finished automatically":"stopped manually"})`;
+  }else{
+    $("#studio-summary-card").style.display="none";
+  }
+}
+
+$("#studio-connect-yt-btn").onclick=()=>connectPlatform("youtube");
+$("#studio-golive-btn").onclick=async()=>{
+  try{await api("/replay/channels/"+currentChannelId+"/go-live",{method:"POST"});toast("Broadcast started (simulated)");refreshStudio();}
+  catch(e){toast(e.message,"err")}
+};
+$("#studio-pause-btn").onclick=async()=>{
+  try{await api("/replay/channels/"+currentChannelId+"/pause",{method:"POST"});refreshStudio();}
+  catch(e){toast(e.message,"err")}
+};
+$("#studio-resume-btn").onclick=async()=>{
+  try{await api("/replay/channels/"+currentChannelId+"/resume",{method:"POST"});refreshStudio();}
+  catch(e){toast(e.message,"err")}
+};
+$("#studio-stop-btn").onclick=async()=>{
+  if(!confirm("Stop this broadcast?"))return;
+  try{await api("/replay/channels/"+currentChannelId+"/stop",{method:"POST"});toast("Broadcast stopped");refreshStudio();}
+  catch(e){toast(e.message,"err")}
+};
+$("#studio-format").onchange=async()=>{
+  try{await api("/replay/channels/"+currentChannelId+"/update",{method:"POST",body:JSON.stringify({output_format:$("#studio-format").value})});}
+  catch(e){toast(e.message,"err");refreshStudio();}
+};
+$("#studio-layout").onchange=async()=>{
+  try{await api("/replay/channels/"+currentChannelId+"/update",{method:"POST",body:JSON.stringify({layout:$("#studio-layout").value})});}
+  catch(e){toast(e.message,"err");refreshStudio();}
+};
+
 /* Social connect / disconnect */
 async function connectPlatform(p){
   try{
@@ -1067,7 +1359,7 @@ $("#bili-btn").onclick=async()=>{
     toast("Bilibili connected");
   }catch(e){toast(e.message,"err")}
 };
-window.addEventListener("message",e=>{ if(e.data==="mpt-social-updated"){refreshSocial();toast("Connection updated");} });
+window.addEventListener("message",e=>{ if(e.data==="mpt-social-updated"){refreshSocial();toast("Connection updated");refreshStudio();} });
 window.publishJob=async(id,platforms)=>{
   toast("Publishing…");
   try{

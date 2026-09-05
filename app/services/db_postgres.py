@@ -63,6 +63,9 @@ DEFAULT_PROFILE = {
     "logo_path": "",
     "use_logo": False,
     "avatar_image_path": "",
+    # 24/7 Replay Channel - a simulated, timestamp-based looped-playback demo
+    # layered on top of the real YouTube connection (see app/services/replay.py).
+    "replay_channels": [],
 }
 
 DEFAULT_GLOBAL_SETTINGS = {

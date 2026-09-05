@@ -5,4 +5,4 @@ Disallow: /admin
 Disallow: /tasks
 Disallow: /api/
 
-Sitemap: https://vidzy.web.app/sitemap.xml
+Sitemap: https://vidzone.live/sitemap.xml
