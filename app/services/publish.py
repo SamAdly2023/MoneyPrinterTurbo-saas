@@ -32,9 +32,14 @@ from loguru import logger
 from app.services import firestore_db
 
 YT_SCOPE = (
-    "https://www.googleapis.com/auth/youtube.upload "
+    "https://www.googleapis.com/auth/youtube.force-ssl "
     "https://www.googleapis.com/auth/youtube.readonly"
 )
+# force-ssl is a superset of youtube.upload (videos.insert accepts it too),
+# and is also what liveBroadcasts/liveStreams write operations require - see
+# app/services/live_stream.py. Accounts connected before this change need to
+# reconnect to be granted it; see youtube_needs_reconnect() below.
+YT_LIVE_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
 TT_SCOPE = "user.info.basic,video.upload"
 FB_SCOPE = "pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish"
 META_API = "https://graph.facebook.com/v21.0"
@@ -128,6 +133,12 @@ def youtube_exchange_code(uid: str, code: str) -> dict:
         "access_token": tok.get("access_token", ""),
         "refresh_token": tok.get("refresh_token", ""),
         "expiry": time.time() + int(tok.get("expires_in", 3600)) - 60,
+        # Google's authorization-code exchange returns what was actually
+        # granted (space-delimited) - a refresh response doesn't reliably
+        # include this, so only this path ever sets it. Lets
+        # youtube_needs_reconnect() detect a stale-scope token without
+        # waiting for a live API call to fail.
+        "scope": tok.get("scope", ""),
     }
     try:
         info["channel"] = _youtube_channel_title(info["access_token"])
@@ -170,6 +181,13 @@ def _youtube_token(uid: str) -> str:
     if time.time() >= info.get("expiry", 0):
         return _youtube_refresh(uid)
     return info["access_token"]
+
+
+def youtube_access_token(uid: str) -> str:
+    """Public accessor for app/services/live_stream.py's Live Streaming API
+    calls - refreshes if expired, same as every other YouTube call in this
+    module."""
+    return _youtube_token(uid)
 
 
 def _youtube_channel_title(token: str) -> str:
@@ -247,7 +265,21 @@ def youtube_status(uid: str) -> dict:
     return {
         "connected": bool(info.get("refresh_token") or info.get("access_token")),
         "channel": info.get("channel", ""),
+        "needs_reconnect_for_live": youtube_needs_reconnect(uid),
     }
+
+
+def youtube_needs_reconnect(uid: str) -> bool:
+    """True if the stored token predates the live-streaming scope (or was
+    never recorded, i.e. connected before the `scope` field existed) - Go
+    Live for a real channel needs this checked before attempting any
+    liveBroadcasts/liveStreams call, which would otherwise just fail with an
+    opaque 403 from Google."""
+    info = firestore_db.get_user_social(uid).get("youtube", {})
+    if not info.get("refresh_token"):
+        return False  # not connected at all - not a "reconnect" case
+    granted = set((info.get("scope") or "").split())
+    return YT_LIVE_SCOPE not in granted
 
 
 # --------------------------------------------------------------------------- #

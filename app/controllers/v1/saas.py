@@ -1092,6 +1092,7 @@ class ReplayChannelBody(BaseModel):
     replay_mode: Optional[str] = "loop"
     output_format: Optional[str] = "9:16"
     layout: Optional[str] = "spotlight"
+    is_real: Optional[bool] = False  # True = a real YouTube Live broadcast, not a simulated demo
 
 
 @router.post("/saas/replay/channels", summary="Create a replay channel")
@@ -1101,6 +1102,7 @@ def replay_create_channel(request: Request, body: ReplayChannelBody):
         channel = replay.create_channel(
             uid, body.name, body.source_kind, body.source_ref,
             replay_mode=body.replay_mode, output_format=body.output_format, layout=body.layout,
+            is_real=bool(body.is_real),
         )
     except ValueError as e:
         return utils.get_response(400, message=str(e))

@@ -401,6 +401,14 @@
         </div>
         <div class="field"><label>Layout</label>
           <select id="replay-layout"><option value="spotlight">Spotlight</option><option value="speaker">Speaker</option><option value="grid">Grid</option></select></div>
+        <div class="field">
+          <label>Broadcast type</label>
+          <div style="display:flex;gap:10px;margin-bottom:6px">
+            <button class="btn sm" id="replay-type-demo" type="button">Simulated demo</button>
+            <button class="btn sm ghost" id="replay-type-real" type="button">Real YouTube Live</button>
+          </div>
+          <p class="hint" id="replay-type-hint">Loops playback locally for your own reference — no real broadcast is sent.</p>
+        </div>
         <div class="form-actions"><button class="btn primary" id="replay-create-btn">Create channel</button></div>
       </div>
 
@@ -410,7 +418,7 @@
     <!-- LIVE STUDIO -->
     <section class="view" id="view-replay-studio">
       <div class="page-head">
-        <div><h2 id="studio-name">Live Studio</h2><p>Demo broadcast — simulated 24/7 loop playback, not a real YouTube Live stream.</p></div>
+        <div><h2 id="studio-name">Live Studio</h2><p id="studio-subhead">Demo broadcast — simulated 24/7 loop playback, not a real YouTube Live stream.</p></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
           <span class="pill" id="studio-status-pill">Idle</span>
           <button class="btn ghost sm" data-view="replay">← Channels</button>
@@ -423,6 +431,7 @@
             <video id="studio-player" muted playsinline controls style="width:100%;aspect-ratio:9/16;border-radius:12px;background:#000"></video>
             <div id="studio-overlay" style="position:absolute;top:10px;left:10px;background:rgba(0,0,0,.6);color:#fff;padding:5px 10px;border-radius:999px;font-size:12px;font-weight:700;display:none"></div>
           </div>
+          <p class="hint" style="text-align:center"><a id="studio-watch-link" href="#" target="_blank" rel="noopener" style="display:none">▶ Watch on YouTube</a></p>
           <div class="form-actions" style="justify-content:center;margin-top:16px">
             <button class="btn primary" id="studio-golive-btn">⚡ Go Live</button>
             <button class="btn" id="studio-pause-btn" style="display:none">⏸ Pause</button>
@@ -446,6 +455,7 @@
             <div class="section-title">Destination</div>
             <p class="hint" id="studio-destination"></p>
             <button class="btn sm" id="studio-connect-yt-btn" style="display:none">▶ Connect YouTube</button>
+            <p class="hint" id="studio-reconnect-hint" style="display:none;color:#f5c56b">This YouTube connection needs to be renewed for live streaming.</p>
           </div>
           <div class="card" id="studio-summary-card" style="display:none">
             <div class="section-title">Last session summary</div>
@@ -1128,7 +1138,21 @@ const REPLAY_STATUS_META={
 let currentChannelId=null;
 let replaySourcesCache=[];
 let replayUploadedSource=null; // {video_url, duration_seconds} once uploaded
+let replayCreateIsReal=false;
 let studioPollTimer=null;
+
+$("#replay-type-demo").onclick=()=>{
+  replayCreateIsReal=false;
+  $("#replay-type-demo").classList.remove("ghost");
+  $("#replay-type-real").classList.add("ghost");
+  $("#replay-type-hint").textContent="Loops playback locally for your own reference — no real broadcast is sent.";
+};
+$("#replay-type-real").onclick=()=>{
+  replayCreateIsReal=true;
+  $("#replay-type-real").classList.remove("ghost");
+  $("#replay-type-demo").classList.add("ghost");
+  $("#replay-type-hint").textContent="Streams to your real YouTube channel. Needs a channel eligible for live streaming (phone-verified, no recent restrictions) and YouTube reconnected for live access. No pause — Stop ends the broadcast.";
+};
 
 $("#replay-src-tab-job").onclick=()=>{
   $("#replay-src-tab-job").classList.remove("ghost");
@@ -1165,7 +1189,7 @@ function renderReplayChannels(channels){
     return `<div class="job">
       <div class="top">
         <div>
-          <p class="title">${esc(c.name)}</p>
+          <p class="title">${esc(c.name)} <span class="pill off" style="font-size:11px">${c.is_real?"🔴 Real":"🎬 Demo"}</span></p>
           <div class="meta">${esc(c.output_format)} · ${esc(c.layout)} · ${c.replay_mode==="loop"?"loop":"play once"}</div>
         </div>
         <span class="pill ${m.cls}">${m.label}</span>
@@ -1213,6 +1237,7 @@ $("#replay-create-btn").onclick=async()=>{
       replay_mode:$("#replay-mode").value,
       output_format:$("#replay-format").value,
       layout:$("#replay-layout").value,
+      is_real:replayCreateIsReal,
     })});
     toast("Channel created");
     $("#replay-name").value="";
@@ -1254,6 +1279,9 @@ async function refreshStudio(){
   const m=REPLAY_STATUS_META[c.status]||REPLAY_STATUS_META.idle;
   $("#studio-status-pill").className="pill "+m.cls;
   $("#studio-status-pill").textContent=m.label;
+  $("#studio-subhead").textContent=c.is_real
+    ? "Real YouTube Live broadcast — sent to your connected channel. No pause; Stop ends it."
+    : "Demo broadcast — simulated 24/7 loop playback, not a real YouTube Live stream.";
 
   const player=$("#studio-player");
   if(player.dataset.src!==c.source_video_url){
@@ -1264,11 +1292,18 @@ async function refreshStudio(){
   const overlay=$("#studio-overlay");
   const live=c.status==="live"||c.status==="paused";
   overlay.style.display=live?"block":"none";
-  overlay.textContent=c.status==="live"?`🔴 SIMULATED LIVE · Loop ${c.loop_count}`:c.status==="paused"?"⏸ Paused":"";
+  overlay.textContent=c.status==="live"?`🔴 ${c.is_real?"LIVE":"SIMULATED LIVE"} · Loop ${c.loop_count}`:c.status==="paused"?"⏸ Paused":"";
+
+  const watchLink=$("#studio-watch-link");
+  if(c.is_real&&c.youtube_watch_url&&(c.status==="live"||c.status==="ended")){
+    watchLink.href=c.youtube_watch_url;watchLink.style.display="";
+  }else{
+    watchLink.style.display="none";
+  }
 
   $("#studio-golive-btn").style.display=(c.status==="idle"||c.status==="ended")?"":"none";
-  $("#studio-pause-btn").style.display=(c.status==="live")?"":"none";
-  $("#studio-resume-btn").style.display=(c.status==="paused")?"":"none";
+  $("#studio-pause-btn").style.display=(c.status==="live"&&!c.is_real)?"":"none";
+  $("#studio-resume-btn").style.display=(c.status==="paused"&&!c.is_real)?"":"none";
   $("#studio-stop-btn").style.display=(c.status==="live"||c.status==="paused")?"":"none";
 
   $("#studio-format").value=c.output_format;$("#studio-format").disabled=live;
@@ -1279,15 +1314,21 @@ async function refreshStudio(){
   $("#studio-destination").textContent=yt.connected
     ? `Connected — ${yt.channel||"your YouTube channel"}`
     : "Not connected. Connect YouTube to enable Go Live.";
-  $("#studio-golive-hint").textContent=yt.connected?"":"Connect YouTube before going live.";
+  $("#studio-reconnect-hint").style.display=(c.is_real&&yt.connected&&yt.needs_reconnect_for_live)?"":"none";
+  $("#studio-golive-hint").textContent=!yt.connected
+    ? "Connect YouTube before going live."
+    : (c.is_real&&yt.needs_reconnect_for_live)
+      ? "Reconnect YouTube (above) before going live."
+      : "";
 
   $("#studio-elapsed").textContent=fmtElapsed(c.elapsed_seconds);
   $("#studio-loop").textContent=c.loop_count;
   $("#studio-source-name").textContent=c.output_format+" · "+c.layout;
 
   if(c.status==="ended"&&c.session&&c.session.ended_reason){
+    const reasonText={completed:"finished automatically",manual:"stopped manually",process_stopped:"the stream stopped unexpectedly"}[c.session.ended_reason]||c.session.ended_reason;
     $("#studio-summary-card").style.display="";
-    $("#studio-summary-text").textContent=`Ran for ${fmtElapsed(c.elapsed_seconds)}, ${c.loop_count} loop(s), to ${c.session.destination_label||"YouTube"}. (${c.session.ended_reason==="completed"?"finished automatically":"stopped manually"})`;
+    $("#studio-summary-text").textContent=`Ran for ${fmtElapsed(c.elapsed_seconds)}, ${c.loop_count} loop(s), to ${c.session.destination_label||"YouTube"}. (${reasonText})`;
   }else{
     $("#studio-summary-card").style.display="none";
   }

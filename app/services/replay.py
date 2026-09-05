@@ -1,16 +1,19 @@
-"""24/7 Replay Channel - simulated looped playback of the user's own videos.
+"""24/7 Replay Channel - looped playback of the user's own videos, either
+simulated (demo) or real (an actual YouTube Live broadcast).
 
-Lets a user turn a video they already made (or a fresh upload) into a
-persistent "channel" that appears to replay continuously, framed against
-their real, already-connected YouTube account (see app/services/publish.py -
-no separate mock OAuth is built here; the connection is real, only the
-broadcast itself is simulated).
+Every channel is framed against the user's real, already-connected YouTube
+account (see app/services/publish.py). A demo channel (`is_real=False`) never
+does real RTMP ingestion or calls the YouTube Live Streaming API - "Go Live"
+just starts a timestamp-based simulation. A real channel (`is_real=True`)
+delegates to app/services/live_stream.py to actually create/bind a YouTube
+liveBroadcast+liveStream and push video to it via ffmpeg.
 
-Nothing here does real RTMP ingestion or calls the YouTube Live Streaming
-API - "Go Live" just starts a timestamp-based simulation. Elapsed time and
-loop count are always recomputed from persisted timestamps (never an
-in-memory counter), so a page refresh, a second tab, or a server restart all
-agree on the same numbers - see _recompute() below.
+Elapsed time and loop count are always recomputed from persisted timestamps
+(never an in-memory counter), so a page refresh, a second tab, or a server
+restart all agree on the same numbers - see _recompute() below. This holds
+for real channels too; the only extra thing _recompute() does for a real,
+live channel is check whether its ffmpeg process is still actually running
+(live_stream.is_alive()) and auto-end it if not.
 
 Storage: a small JSON blob per user (profile["replay_channels"]), the same
 shallow-merge pattern app/services/db_*.py already use for every other
@@ -24,7 +27,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import UploadFile
 
-from app.services import clips, firestore_db, publish, saas
+from app.services import clips, firestore_db, live_stream, publish, saas
 from app.utils import utils
 
 STATUS_IDLE = "idle"
@@ -162,6 +165,7 @@ def create_channel(
     replay_mode: str = "loop",
     output_format: str = "9:16",
     layout: str = "spotlight",
+    is_real: bool = False,
 ) -> dict:
     name = (name or "").strip() or "My First Stream"
     if source_kind not in ("job", "upload"):
@@ -207,6 +211,14 @@ def create_channel(
         "status": STATUS_IDLE,
         "created_at": now,
         "updated_at": now,
+        "is_real": bool(is_real),
+        # Only ever set for a real channel, by go_live() in live_stream.py's
+        # branch below - None for demo channels and before the first real
+        # Go Live.
+        "youtube_broadcast_id": None,
+        "youtube_stream_id": None,
+        "youtube_watch_url": None,
+        "ffmpeg_pid": None,
         "session": {
             "started_at": None,
             "paused_at": None,
@@ -294,6 +306,30 @@ def go_live(uid: str, channel_id: str) -> dict:
     if not youtube.get("connected"):
         raise ValueError("connect YouTube before going live")
 
+    if channel.get("is_real"):
+        if publish.youtube_needs_reconnect(uid):
+            raise ValueError(
+                "Your YouTube connection needs to be renewed for live streaming - "
+                "reconnect YouTube (Settings or the dashboard's YouTube button) and try again."
+            )
+        try:
+            result = live_stream.create_broadcast_and_stream(uid, channel["name"])
+            pid = live_stream.start_push_with_fallback(
+                channel["id"], path, result["rtmps_url"], result["rtmp_url"],
+                is_job_source=(channel["source_kind"] == "job"),
+                loop=(channel["replay_mode"] == "loop"),
+            )
+        except RuntimeError as e:
+            raise ValueError(
+                f"Couldn't start the live stream: {e}. If this is a new channel, make sure "
+                "live streaming is enabled for it (phone-verified, no recent restrictions) - "
+                "see https://support.google.com/youtube/answer/2474026."
+            )
+        channel["youtube_broadcast_id"] = result["broadcast_id"]
+        channel["youtube_stream_id"] = result["stream_id"]
+        channel["youtube_watch_url"] = result["watch_url"]
+        channel["ffmpeg_pid"] = pid
+
     now = _now_iso()
     channel["status"] = STATUS_LIVE
     channel["session"] = {
@@ -318,6 +354,12 @@ def pause(uid: str, channel_id: str) -> dict:
         raise ValueError("channel not found")
     if channel["status"] != STATUS_LIVE:
         raise ValueError("channel isn't live")
+    if channel.get("is_real"):
+        raise ValueError(
+            "Real YouTube Live broadcasts can't be paused - YouTube has no pause "
+            "primitive; stopping the feed just ends the stream. Use Stop, then Go "
+            "Live again to start a new broadcast."
+        )
 
     channel["session"]["paused_at"] = _now_iso()
     channel["status"] = STATUS_PAUSED
@@ -334,6 +376,10 @@ def resume(uid: str, channel_id: str) -> dict:
         raise ValueError("channel not found")
     if channel["status"] != STATUS_PAUSED:
         raise ValueError("channel isn't paused")
+    if channel.get("is_real"):
+        # Real channels never reach STATUS_PAUSED (pause() rejects them
+        # first) - this branch only guards against a stale/corrupted record.
+        raise ValueError("real YouTube Live broadcasts can't be paused or resumed")
 
     session = channel["session"]
     paused_at = _parse_iso(session["paused_at"])
@@ -354,6 +400,11 @@ def stop(uid: str, channel_id: str) -> dict:
         raise ValueError("channel not found")
     if channel["status"] not in (STATUS_LIVE, STATUS_PAUSED):
         raise ValueError("channel isn't broadcasting")
+
+    if channel.get("is_real"):
+        live_stream.stop_push(channel["id"], channel.get("ffmpeg_pid"))
+        if channel.get("youtube_broadcast_id"):
+            live_stream.end_broadcast(uid, channel["youtube_broadcast_id"])
 
     _recompute(channel)
     session = channel["session"]
@@ -389,6 +440,28 @@ def _recompute(channel: dict) -> bool:
         channel["loop_count"] = 1
         return False
 
+    if status == STATUS_LIVE and channel.get("is_real") and not live_stream.is_alive(channel["id"], channel.get("ffmpeg_pid")):
+        # The ffmpeg push died on its own - a crash, a network drop, the
+        # host killing a long-running process, or (for replay_mode=="once")
+        # simply reaching EOF and exiting cleanly. Either way the broadcast
+        # is no longer actually live; reflect that rather than showing
+        # "live" for a stream that stopped streaming. Unlike the once-mode
+        # demo case below, there's no way to know the exact moment it died,
+        # only that it's confirmed dead by now - "now" is the best available
+        # ended_at.
+        duration_reached = (
+            (_now() - started_at).total_seconds() - session["accumulated_paused_seconds"] >= duration
+        )
+        ended_at = _now()
+        session["ended_at"] = ended_at.isoformat()
+        session["ended_reason"] = "completed" if (channel["replay_mode"] == "once" and duration_reached) else "process_stopped"
+        channel["status"] = STATUS_ENDED
+        status = STATUS_ENDED
+        changed = True
+        just_ended_real = True
+    else:
+        just_ended_real = False
+
     if status == STATUS_LIVE:
         raw = (_now() - started_at).total_seconds() - session["accumulated_paused_seconds"]
     elif status == STATUS_PAUSED:
@@ -423,4 +496,12 @@ def _recompute(channel: dict) -> bool:
 
     channel["elapsed_seconds"] = round(elapsed_seconds, 1)
     channel["loop_count"] = loop_count
+    if just_ended_real:
+        channel["summary"] = {
+            "duration_seconds": channel["elapsed_seconds"],
+            "loop_count": loop_count,
+            "destination_platform": session.get("destination_platform", "youtube"),
+            "destination_label": session.get("destination_label", ""),
+            "ended_reason": session.get("ended_reason"),
+        }
     return changed
