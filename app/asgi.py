@@ -17,7 +17,7 @@ from app.utils import utils
 
 _PUBLIC_PATHS = {
     "/", "/login", "/logout", "/api/v1/auth/session", "/logo.svg", "/logo.png", "/logo-icon.png",
-    "/privacy", "/terms", "/robots.txt", "/sitemap.xml",
+    "/privacy", "/terms", "/robots.txt", "/sitemap.xml", "/manifest.json",
     # Anonymous visitor pageview beacon fired from the public marketing pages.
     "/api/v1/track/pageview",
     # PayPal's server calling us directly - no browser session cookie exists.
