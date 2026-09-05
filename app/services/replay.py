@@ -144,14 +144,27 @@ def _validate_public_url(url: str) -> None:
 
 
 def save_replay_url_import(uid: str, url: str) -> dict:
-    """Secondary path #2: import a video by direct link instead of uploading
-    a file - same trust model, size cap, and destination as save_replay_upload,
-    just sourced from a streamed download instead of a browser upload."""
+    """Secondary path #2: import a video by link instead of uploading a file.
+    Tries a plain direct-file download first (fast, no extra dependency);
+    if that doesn't look like a video (e.g. the link is a YouTube/video-site
+    *page*, not a raw media file - the common case), falls back to yt-dlp,
+    which knows how to pull the actual video out of hundreds of sites'
+    pages. Either way: you're responsible for having the rights to use
+    whatever you import here, same as every other honesty expectation this
+    feature already carries (no guaranteed watch-hour eligibility, etc.)."""
     url = (url or "").strip()
     if not url:
         raise ValueError("enter a video URL")
     _validate_public_url(url)
 
+    try:
+        return _download_direct_file(url)
+    except ValueError:
+        pass  # not a direct video file - try it as a video-site page instead
+    return _import_via_ytdlp(url)
+
+
+def _download_direct_file(url: str) -> dict:
     ext = os.path.splitext(urlparse(url).path)[1].lower()
     if ext not in ALLOWED_UPLOAD_EXTS:
         ext = ".mp4"  # unknown/missing extension in the URL - content gets validated below regardless
@@ -180,6 +193,53 @@ def save_replay_url_import(uid: str, url: str) -> dict:
     except Exception:
         if os.path.isfile(dest_path):
             os.remove(dest_path)
+        raise
+
+    return {"video_url": f"/media/{filename}", "duration_seconds": duration}
+
+
+def _import_via_ytdlp(url: str) -> dict:
+    """Extracts and downloads the actual video from a video-site page
+    (YouTube, and hundreds of other sites yt-dlp supports) rather than
+    fetching the URL literally, which would just save the HTML page.
+    _validate_public_url already blocked the user-supplied URL from
+    pointing at an internal address; yt-dlp's own follow-up requests to a
+    site's real CDN (e.g. googlevideo.com) for the actual media are the
+    intended, legitimate part of extraction, not something to block."""
+    import yt_dlp
+
+    video_id = utils.get_uuid()
+    dest_template = os.path.join(saas.output_dir(), f"{_UPLOAD_PREFIX}{video_id}.%(ext)s")
+    ydl_opts = {
+        "outtmpl": dest_template,
+        "format": "mp4/best[ext=mp4]/best",
+        "max_filesize": MAX_UPLOAD_BYTES,
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "socket_timeout": 30,
+        "restrictfilenames": True,
+    }
+    actual_path = None
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            actual_path = ydl.prepare_filename(info)
+        if not actual_path or not os.path.isfile(actual_path):
+            raise ValueError("could not import a video from that link")
+        ext = os.path.splitext(actual_path)[1].lower()
+        if ext not in ALLOWED_UPLOAD_EXTS:
+            raise ValueError(f"that link produced an unsupported format: {ext or 'unknown'}")
+        duration = float(info.get("duration") or 0) or clips.probe_duration(actual_path)
+        filename = os.path.basename(actual_path)
+    except yt_dlp.utils.DownloadError as e:
+        if actual_path and os.path.isfile(actual_path):
+            os.remove(actual_path)
+        raise ValueError(f"couldn't import that video: {e}")
+    except Exception:
+        if actual_path and os.path.isfile(actual_path):
+            os.remove(actual_path)
         raise
 
     return {"video_url": f"/media/{filename}", "duration_seconds": duration}

@@ -27,6 +27,11 @@ PyMySQL==1.2.0
 # The -binary build ships precompiled wheels, same reasoning as PyMySQL
 # above: no C compiler needed on shared hosting.
 psycopg2-binary==2.9.12
+# Replay Channels: importing a video from a link (app/services/replay.py's
+# _import_via_ytdlp) when it's a video-site page rather than a raw file -
+# pure Python, no compiled extension, same shared-hosting-friendly profile
+# as the two packages above.
+yt-dlp==2026.8.19
 
 # Optional unofficial g4f provider is intentionally not installed by default.
 # Use `uv sync --extra g4f` only when you explicitly accept that provider risk.
