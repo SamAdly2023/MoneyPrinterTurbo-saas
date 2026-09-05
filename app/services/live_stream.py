@@ -220,6 +220,14 @@ def set_thumbnail(uid: str, video_id: str, jpeg_bytes: bytes) -> None:
         logger.warning(f"thumbnail generation/upload failed for {video_id}: {e}")
 
 
+def _has_audio_stream(source_path: str) -> bool:
+    clip = VideoFileClip(source_path)
+    try:
+        return clip.audio is not None
+    finally:
+        clip.close()
+
+
 def _build_ffmpeg_command(source_path: str, rtmp_target: str, is_job_source: bool, loop: bool) -> list:
     ffmpeg = utils.get_ffmpeg_binary()
     command = [ffmpeg, "-loglevel", "warning", "-re"]
@@ -231,10 +239,22 @@ def _build_ffmpeg_command(source_path: str, rtmp_target: str, is_job_source: boo
         # _ENCODE_PRESET / audio_codec) - remux only, near-zero CPU.
         command += ["-c:v", "copy", "-c:a", "copy"]
     else:
-        # Unknown codec/container from the secondary upload path - a real
-        # re-encode to a conservative RTMP-safe profile, tuned for low
-        # latency rather than file-size/quality (video.py's render settings
-        # are the wrong tradeoff for a live push).
+        # Unknown codec/container AND unknown audio presence from the
+        # secondary upload/URL-import path (e.g. a video-only clip pulled
+        # via yt-dlp, which often serves video and audio as separate
+        # adaptive streams and can hand back a video-only one). Asking
+        # ffmpeg to encode "-c:a aac" with no audio stream and no explicit
+        # -map left it stuck reading input and writing nothing at all -
+        # confirmed on a real broadcast (alive per the OS, zero bytes ever
+        # written). YouTube Live also generally won't treat a video-only
+        # feed as healthy, so synthesize silence rather than omit audio.
+        if _has_audio_stream(source_path):
+            command += ["-map", "0:v:0", "-map", "0:a:0"]
+        else:
+            command += [
+                "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+                "-map", "0:v:0", "-map", "1:a:0", "-shortest",
+            ]
         command += [
             "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
             "-b:v", "4500k", "-maxrate", "4500k", "-bufsize", "9000k",
