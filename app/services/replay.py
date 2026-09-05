@@ -400,6 +400,15 @@ def go_live(uid: str, channel_id: str) -> dict:
         channel["youtube_watch_url"] = result["watch_url"]
         channel["ffmpeg_pid"] = pid
 
+        # Best-effort - a thumbnail failure (e.g. the channel isn't
+        # phone-verified, which custom thumbnails also require) shouldn't
+        # block Go Live; the ffmpeg push above already started regardless.
+        try:
+            thumbnail = live_stream.generate_thumbnail(path, channel["name"], channel["duration_seconds"])
+            live_stream.set_thumbnail(uid, result["broadcast_id"], thumbnail)
+        except Exception:  # noqa: BLE001
+            pass
+
     now = _now_iso()
     channel["status"] = STATUS_LIVE
     channel["session"] = {
