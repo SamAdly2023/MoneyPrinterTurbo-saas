@@ -1202,6 +1202,7 @@ function renderReplayChannels(channels){
         </div>
         <span class="pill ${m.cls}">${m.label}</span>
       </div>
+      ${c.is_real&&c.youtube_watch_url&&c.status==="live"?`<p class="hint"><a href="${esc(c.youtube_watch_url)}" target="_blank" rel="noopener">▶ Watch live on YouTube</a></p>`:""}
       <div class="actions">
         <button class="btn sm" onclick="openReplayStudio('${c.id}')">🎬 Open Studio</button>
         <button class="btn sm danger" onclick="deleteReplayChannel('${c.id}')">🗑 Delete</button>

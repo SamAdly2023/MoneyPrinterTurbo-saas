@@ -320,6 +320,34 @@ def enable_user(request: Request, uid: str = Path(...)):
     return utils.get_response(200, {"uid": uid, "is_disabled": False})
 
 
+class AutoModeBody(BaseModel):
+    enabled: bool
+
+
+@router.post("/admin/users/{uid}/automode", summary="Turn a user's auto-mode on/off")
+def set_user_automode(request: Request, body: AutoModeBody, uid: str = Path(...)):
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    firestore_db.save_user_profile(uid, {"auto_mode": body.enabled})
+    if body.enabled:
+        saas.engine.wake()
+    return utils.get_response(200, {"uid": uid, "auto_mode": body.enabled})
+
+
+class AdjustCreditsBody(BaseModel):
+    amount: int  # positive to grant, negative to deduct/correct
+
+
+@router.post("/admin/users/{uid}/credits", summary="Manually grant (or deduct) a user's credit balance")
+def adjust_user_credits(request: Request, body: AdjustCreditsBody, uid: str = Path(...)):
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    if body.amount == 0:
+        return utils.get_response(400, message="amount can't be zero")
+    firestore_db.add_credits(uid, body.amount)
+    return utils.get_response(200, {"uid": uid, "credits": firestore_db.get_user_credits(uid)})
+
+
 @router.get("/admin/jobs", summary="Every job across every user")
 def list_all_jobs(request: Request):
     if (denied := _require_admin(request)) is not None:
