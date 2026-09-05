@@ -42,6 +42,13 @@ THUMBNAIL_SIZE = (1280, 720)  # YouTube's required thumbnail dimensions
 # The channel's persisted ffmpeg_pid (see replay.py) is the fallback so
 # stop() can still reach an orphaned process afterward.
 _RUNNING: dict[str, subprocess.Popen] = {}
+# The open log-file handles backing each process's stderr redirection (see
+# start_push_with_fallback) - kept so stop_push can close them.
+_LOG_FILES: dict[str, object] = {}
+
+
+def _log_dir() -> str:
+    return utils.storage_dir("replay_logs", create=True)
 
 
 def _now_iso() -> str:
@@ -215,7 +222,7 @@ def set_thumbnail(uid: str, video_id: str, jpeg_bytes: bytes) -> None:
 
 def _build_ffmpeg_command(source_path: str, rtmp_target: str, is_job_source: bool, loop: bool) -> list:
     ffmpeg = utils.get_ffmpeg_binary()
-    command = [ffmpeg, "-re"]
+    command = [ffmpeg, "-loglevel", "warning", "-re"]
     if loop:
         command += ["-stream_loop", "-1"]
     command += ["-i", source_path]
@@ -244,17 +251,31 @@ def start_push_with_fallback(channel_id: str, source_path: str, rtmps_url: str, 
     falls back to plain RTMP if the resolved ffmpeg binary wasn't built with
     TLS support (not guaranteed for the bundled imageio_ffmpeg fallback -
     see utils.get_ffmpeg_binary()) and dies immediately. Returns the pid of
-    whichever process is actually running."""
+    whichever process is actually running.
+
+    ffmpeg's stderr is redirected to a real log file, not a pipe - a pipe
+    nobody keeps reading fills its OS buffer (~64KB) within a couple minutes
+    of ffmpeg's normal status output for a long -stream_loop run, and once
+    full the child blocks trying to write more and effectively stalls: it
+    stays alive (ps still shows it) but never makes further progress, which
+    is exactly what silently broke the first two real broadcasts this
+    shipped with - both looked "started" in our own logs but never actually
+    went live on YouTube's side."""
+    log_path = os.path.join(_log_dir(), f"{channel_id}.log")
     for target in (rtmps_url, rtmp_url):
         command = _build_ffmpeg_command(source_path, target, is_job_source, loop)
-        proc = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        log_file = open(log_path, "wb")
+        proc = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=log_file)
         time.sleep(3)
         if proc.poll() is None:
             _RUNNING[channel_id] = proc
+            _LOG_FILES[channel_id] = log_file
             logger.success(f"live push started for channel {channel_id}: pid={proc.pid} target={target}")
             return proc.pid
-        stderr = (proc.stderr.read() or b"").decode(errors="replace")[:500] if proc.stderr else ""
-        logger.warning(f"ffmpeg exited immediately for {target}, trying next option: {stderr}")
+        log_file.close()
+        with open(log_path, "rb") as f:
+            tail = f.read()[-500:].decode(errors="replace")
+        logger.warning(f"ffmpeg exited immediately for {target}, trying next option: {tail}")
     raise RuntimeError("ffmpeg could not start pushing to YouTube - check that ffmpeg is installed correctly")
 
 
@@ -276,18 +297,23 @@ def is_alive(channel_id: str, pid) -> bool:
 
 def stop_push(channel_id: str, pid) -> None:
     proc = _RUNNING.pop(channel_id, None)
-    if proc is not None and proc.poll() is None:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        return
-    if pid:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except OSError:
-            pass  # already dead, or this pid was never ours - nothing to do
+    log_file = _LOG_FILES.pop(channel_id, None)
+    try:
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            return
+        if pid:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass  # already dead, or this pid was never ours - nothing to do
+    finally:
+        if log_file is not None:
+            log_file.close()
 
 
 def end_broadcast(uid: str, broadcast_id: str) -> None:
