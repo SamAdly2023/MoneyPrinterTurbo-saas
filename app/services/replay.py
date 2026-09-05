@@ -22,9 +22,13 @@ SQL table, unlike the PayPal credits system - there is no money involved and
 no cross-user query need, so the lighter pattern is proportionate here.
 """
 
+import ipaddress
 import os
+import socket
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
+import requests
 from fastapi import UploadFile
 
 from app.services import clips, firestore_db, live_stream, publish, saas
@@ -106,6 +110,72 @@ def save_replay_upload(uid: str, file: UploadFile) -> dict:
                 out.write(chunk)
         if size == 0:
             raise ValueError("uploaded file is empty")
+        duration = clips.probe_duration(dest_path)
+    except Exception:
+        if os.path.isfile(dest_path):
+            os.remove(dest_path)
+        raise
+
+    return {"video_url": f"/media/{filename}", "duration_seconds": duration}
+
+
+def _validate_public_url(url: str) -> None:
+    """Defense against this becoming a server-side-request-forgery vector:
+    the app would otherwise fetch whatever URL a user pastes in, from the
+    server's own network position - blocks obviously-internal targets
+    (localhost, private/link-local ranges, the cloud metadata address,
+    multicast/reserved space). Not airtight against DNS-rebinding (the
+    resolved address could change between this check and the actual
+    request), but a real, proportionate mitigation for a feature that isn't
+    otherwise handling untrusted internal-network-adjacent input."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("only http/https video links are supported")
+    if not parsed.hostname:
+        raise ValueError("that doesn't look like a valid URL")
+    try:
+        addr_info = socket.getaddrinfo(parsed.hostname, None)
+    except socket.gaierror:
+        raise ValueError("could not resolve that URL's host")
+    for _family, _type, _proto, _canonname, sockaddr in addr_info:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+            raise ValueError("that URL points to a private/internal address, which isn't allowed")
+
+
+def save_replay_url_import(uid: str, url: str) -> dict:
+    """Secondary path #2: import a video by direct link instead of uploading
+    a file - same trust model, size cap, and destination as save_replay_upload,
+    just sourced from a streamed download instead of a browser upload."""
+    url = (url or "").strip()
+    if not url:
+        raise ValueError("enter a video URL")
+    _validate_public_url(url)
+
+    ext = os.path.splitext(urlparse(url).path)[1].lower()
+    if ext not in ALLOWED_UPLOAD_EXTS:
+        ext = ".mp4"  # unknown/missing extension in the URL - content gets validated below regardless
+
+    filename = f"{_UPLOAD_PREFIX}{utils.get_uuid()}{ext}"
+    dest_path = os.path.join(saas.output_dir(), filename)
+    size = 0
+    try:
+        with requests.get(url, stream=True, timeout=30) as resp:
+            if not resp.ok:
+                raise ValueError(f"could not download that URL (HTTP {resp.status_code})")
+            content_type = resp.headers.get("Content-Type", "")
+            if content_type and not content_type.startswith("video/") and "octet-stream" not in content_type:
+                raise ValueError(f"that URL doesn't look like a video (content-type: {content_type})")
+            with open(dest_path, "wb") as out:
+                for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                    if not chunk:
+                        continue
+                    size += len(chunk)
+                    if size > MAX_UPLOAD_BYTES:
+                        raise ValueError("video too large (max 500MB)")
+                    out.write(chunk)
+        if size == 0:
+            raise ValueError("downloaded file is empty")
         duration = clips.probe_duration(dest_path)
     except Exception:
         if os.path.isfile(dest_path):

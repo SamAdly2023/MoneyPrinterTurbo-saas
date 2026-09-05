@@ -382,15 +382,21 @@
         <div class="field"><label>Name</label><input id="replay-name" placeholder="My First Stream" /></div>
         <div class="field">
           <label>Source video</label>
-          <div style="display:flex;gap:10px;margin-bottom:10px">
+          <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap">
             <button class="btn sm" id="replay-src-tab-job" type="button">From my videos</button>
             <button class="btn sm ghost" id="replay-src-tab-upload" type="button">Upload a video</button>
+            <button class="btn sm ghost" id="replay-src-tab-url" type="button">Import from URL</button>
           </div>
           <select id="replay-source-job"></select>
           <div id="replay-source-upload-wrap" style="display:none">
             <input type="file" id="replay-upload-file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,.mp4,.mov,.mkv,.webm,.m4v" />
             <button class="btn sm" id="replay-upload-btn" type="button" style="margin-left:8px">Upload</button>
             <p class="hint" id="replay-upload-status"></p>
+          </div>
+          <div id="replay-source-url-wrap" style="display:none">
+            <input type="url" id="replay-url-input" placeholder="https://example.com/video.mp4" style="width:100%" />
+            <button class="btn sm" id="replay-url-import-btn" type="button" style="margin-top:8px">Import</button>
+            <p class="hint" id="replay-url-status"></p>
           </div>
         </div>
         <div class="grid2">
@@ -1154,18 +1160,19 @@ $("#replay-type-real").onclick=()=>{
   $("#replay-type-hint").textContent="Streams to your real YouTube channel. Needs a channel eligible for live streaming (phone-verified, no recent restrictions) and YouTube reconnected for live access. No pause — Stop ends the broadcast.";
 };
 
-$("#replay-src-tab-job").onclick=()=>{
-  $("#replay-src-tab-job").classList.remove("ghost");
-  $("#replay-src-tab-upload").classList.add("ghost");
-  $("#replay-source-job").style.display="";
-  $("#replay-source-upload-wrap").style.display="none";
-};
-$("#replay-src-tab-upload").onclick=()=>{
-  $("#replay-src-tab-upload").classList.remove("ghost");
-  $("#replay-src-tab-job").classList.add("ghost");
-  $("#replay-source-job").style.display="none";
-  $("#replay-source-upload-wrap").style.display="block";
-};
+let replaySourceTab="job";
+function setReplaySourceTab(tab){
+  replaySourceTab=tab;
+  const tabs={job:"replay-src-tab-job",upload:"replay-src-tab-upload",url:"replay-src-tab-url"};
+  const wraps={job:"replay-source-job",upload:"replay-source-upload-wrap",url:"replay-source-url-wrap"};
+  for(const t in tabs){
+    $("#"+tabs[t]).classList.toggle("ghost",t!==tab);
+    $("#"+wraps[t]).style.display=(t===tab)?(t==="job"?"":"block"):"none";
+  }
+}
+$("#replay-src-tab-job").onclick=()=>setReplaySourceTab("job");
+$("#replay-src-tab-upload").onclick=()=>setReplaySourceTab("upload");
+$("#replay-src-tab-url").onclick=()=>setReplaySourceTab("url");
 
 async function loadReplayChannels(){
   try{
@@ -1219,12 +1226,25 @@ $("#replay-upload-btn").onclick=async()=>{
   finally{btn.disabled=false;btn.textContent="Upload";}
 };
 
+$("#replay-url-import-btn").onclick=async()=>{
+  const url=$("#replay-url-input").value.trim();
+  if(!url){toast("Paste a video URL first","err");return;}
+  const btn=$("#replay-url-import-btn");btn.disabled=true;btn.textContent="Importing…";
+  $("#replay-url-status").textContent="";
+  try{
+    const d=await api("/replay/import-url",{method:"POST",body:JSON.stringify({url})});
+    replayUploadedSource=d;
+    $("#replay-url-status").textContent=`Ready - ${Math.round(replayUploadedSource.duration_seconds)}s`;
+    toast("Video imported");
+  }catch(e){toast(e.message,"err")}
+  finally{btn.disabled=false;btn.textContent="Import";}
+};
+
 $("#replay-create-btn").onclick=async()=>{
   const name=$("#replay-name").value.trim()||"My First Stream";
-  const usingUpload=$("#replay-source-upload-wrap").style.display!=="none";
   let source_kind,source_ref;
-  if(usingUpload){
-    if(!replayUploadedSource){toast("Upload a video first","err");return;}
+  if(replaySourceTab==="upload"||replaySourceTab==="url"){
+    if(!replayUploadedSource){toast(replaySourceTab==="url"?"Import a video first":"Upload a video first","err");return;}
     source_kind="upload";source_ref=replayUploadedSource.video_url;
   }else{
     source_kind="job";source_ref=$("#replay-source-job").value;
@@ -1243,6 +1263,8 @@ $("#replay-create-btn").onclick=async()=>{
     $("#replay-name").value="";
     replayUploadedSource=null;
     $("#replay-upload-status").textContent="";
+    $("#replay-url-input").value="";
+    $("#replay-url-status").textContent="";
     loadReplayChannels();
   }catch(e){toast(e.message,"err")}
   finally{btn.disabled=false;btn.textContent="Create channel";}

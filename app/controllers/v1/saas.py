@@ -1079,6 +1079,20 @@ def replay_upload(request: Request, file: UploadFile = File(...)):
     return utils.get_response(200, result)
 
 
+class ReplayUrlImportBody(BaseModel):
+    url: str
+
+
+@router.post("/saas/replay/import-url", summary="Import a video from a direct link to use as a replay-channel source")
+def replay_import_url(request: Request, body: ReplayUrlImportBody):
+    uid = _uid(request)
+    try:
+        result = replay.save_replay_url_import(uid, body.url)
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    return utils.get_response(200, result)
+
+
 @router.get("/saas/replay/channels", summary="List this user's replay channels")
 def replay_list_channels(request: Request):
     uid = _uid(request)
