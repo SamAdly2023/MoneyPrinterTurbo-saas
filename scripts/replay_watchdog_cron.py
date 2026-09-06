@@ -28,6 +28,26 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
 os.environ.setdefault("MPT_CONFIG_FILE", os.path.join(BASE_DIR, "config.toml"))
 
+
+def _load_env_file(path: str) -> None:
+    """Cron jobs don't inherit cPanel's Setup-Python-App environment (that's
+    injected by Passenger/CloudLinux only for requests it spawns), so the DB
+    connection vars this script needs live in a plain KEY=VALUE file instead
+    - deliberately not committed to git (see .gitignore) and chmod 600 on
+    the server. Minimal parser, no need for python-dotenv for eight lines."""
+    if not os.path.isfile(path):
+        return
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
+
+
+_load_env_file(os.path.join(BASE_DIR, ".env.cron"))
+
 from app.services import replay  # noqa: E402
 
 if __name__ == "__main__":
