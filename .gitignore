@@ -48,3 +48,6 @@ streamlit.log
 
 # Downloaded service account keys - never commit
 /secrets/
+
+# Per-server DB credentials for the cron-launched replay watchdog - never commit
+/.env.cron

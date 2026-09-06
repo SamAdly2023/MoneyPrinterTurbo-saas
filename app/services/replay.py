@@ -479,7 +479,7 @@ def delete_channel(uid: str, channel_id: str) -> None:
 # Broadcast state machine - see _recompute() for the one timer formula
 # --------------------------------------------------------------------------- #
 def go_live(uid: str, channel_id: str, force: bool = False) -> dict:
-    """force=True is for the watchdog only (see _watchdog_tick()) - it
+    """force=True is for the watchdog only (see run_watchdog_tick()) - it
     restarts a channel that's already marked STATUS_LIVE in our records but
     whose ffmpeg push has actually died, so the "already broadcasting" guard
     below has to be bypassed for that one caller."""
@@ -741,7 +741,7 @@ _WATCHDOG_INTERVAL_SECONDS = 30
 _watchdog_started = False
 
 
-def _watchdog_tick() -> None:
+def run_watchdog_tick() -> None:
     try:
         users = firestore_db.list_users()
     except Exception as e:  # noqa: BLE001
@@ -779,7 +779,7 @@ def _watchdog_tick() -> None:
 
 
 def start_watchdog() -> None:
-    """Idempotent - safe to call more than once. Runs _watchdog_tick() on a
+    """Idempotent - safe to call more than once. Runs run_watchdog_tick() on a
     daemon thread every _WATCHDOG_INTERVAL_SECONDS for the life of the
     process; wired into app/asgi.py's startup_event."""
     global _watchdog_started
@@ -790,7 +790,7 @@ def start_watchdog() -> None:
     def _loop():
         while True:
             time.sleep(_WATCHDOG_INTERVAL_SECONDS)
-            _watchdog_tick()
+            run_watchdog_tick()
 
     threading.Thread(target=_loop, name="replay-watchdog", daemon=True).start()
     logger.info("replay watchdog started")
