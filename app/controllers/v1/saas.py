@@ -1076,6 +1076,14 @@ def replay_upload(request: Request, file: UploadFile = File(...)):
         result = replay.save_replay_upload(uid, file)
     except ValueError as e:
         return utils.get_response(400, message=str(e))
+    except Exception as e:  # noqa: BLE001
+        # A large/slow upload is exactly the kind of request most likely to
+        # hit a client disconnect or read error mid-transfer - without this,
+        # anything other than our own ValueErrors escaped uncaught and (per
+        # a live report) came back to the browser as an HTML error page
+        # instead of JSON, breaking the frontend's error handling entirely.
+        logger.error(f"replay upload failed for {uid} ({file.filename}): {e}")
+        return utils.get_response(500, message="upload failed - please try again")
     return utils.get_response(200, result)
 
 

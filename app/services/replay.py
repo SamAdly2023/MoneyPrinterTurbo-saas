@@ -102,6 +102,7 @@ def save_replay_upload(uid: str, file: UploadFile) -> dict:
     filename = f"{_UPLOAD_PREFIX}{utils.get_uuid()}{ext}"
     dest_path = os.path.join(saas.output_dir(), filename)
     size = 0
+    logger.info(f"replay upload starting for {uid}: {file.filename}")
     try:
         with open(dest_path, "wb") as out:
             while True:
@@ -120,6 +121,7 @@ def save_replay_upload(uid: str, file: UploadFile) -> dict:
             os.remove(dest_path)
         raise
 
+    logger.info(f"replay upload finished for {uid}: {filename} ({size} bytes, {duration:.1f}s)")
     return {"video_url": f"/media/{filename}", "duration_seconds": duration}
 
 
