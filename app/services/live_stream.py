@@ -280,12 +280,26 @@ def start_push_with_fallback(channel_id: str, source_path: str, rtmps_url: str, 
     stays alive (ps still shows it) but never makes further progress, which
     is exactly what silently broke the first two real broadcasts this
     shipped with - both looked "started" in our own logs but never actually
-    went live on YouTube's side."""
+    went live on YouTube's side.
+
+    start_new_session=True detaches ffmpeg into its own OS process group
+    instead of inheriting this (Passenger-managed) process's one. Shared
+    cPanel hosting recycles an idle app process on its own (confirmed from
+    this app's own passenger log: fresh pids appearing every 7-47 minutes
+    all through one night, entirely independent of any deploy) - without
+    this, that recycle would take the ffmpeg child down with it, ending a
+    "until I click Stop" broadcast on a schedule nobody asked for. The
+    persisted ffmpeg_pid (see replay.py) plus is_alive()'s fallback below
+    already assumed the process could outlive this one; this is what
+    actually makes that true instead of just hoped-for."""
     log_path = os.path.join(_log_dir(), f"{channel_id}.log")
     for target in (rtmps_url, rtmp_url):
         command = _build_ffmpeg_command(source_path, target, is_job_source, loop)
         log_file = open(log_path, "wb")
-        proc = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=log_file)
+        proc = subprocess.Popen(
+            command, stdout=subprocess.DEVNULL, stderr=log_file,
+            stdin=subprocess.DEVNULL, start_new_session=True,
+        )
         time.sleep(3)
         if proc.poll() is None:
             _RUNNING[channel_id] = proc
