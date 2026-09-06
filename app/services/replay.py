@@ -218,7 +218,15 @@ def _import_via_ytdlp(url: str) -> dict:
     dest_template = os.path.join(saas.output_dir(), f"{_UPLOAD_PREFIX}{video_id}.%(ext)s")
     ydl_opts = {
         "outtmpl": dest_template,
-        "format": "mp4/best[ext=mp4]/best",
+        # Sites like YouTube split video/audio into separate adaptive
+        # streams once resolution goes above ~720p - the old
+        # "mp4/best[ext=mp4]/best" selector matched a video-only mp4
+        # format (ext=mp4 doesn't imply it has audio) and silently produced
+        # a soundless import. bestvideo+bestaudio explicitly pulls both and
+        # merge_output_format/ffmpeg_location below mux them back together.
+        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/bestvideo+bestaudio/best",
+        "merge_output_format": "mp4",
+        "ffmpeg_location": utils.get_ffmpeg_binary(),
         "max_filesize": MAX_UPLOAD_BYTES,
         "noplaylist": True,
         "quiet": True,
