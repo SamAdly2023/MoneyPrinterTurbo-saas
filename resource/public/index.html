@@ -375,10 +375,10 @@
     <!-- REPLAY CHANNELS -->
     <section class="view" id="view-replay">
       <div class="page-head"><div><h2>Replay Channels</h2><p>Loop one of your videos as a simulated 24/7 stream, framed against your real YouTube connection.</p></div></div>
-      <p class="hint" style="margin:-10px 0 20px">Demo/simulated playback for your own reference — no real RTMP or YouTube Live broadcast is sent, and it does not guarantee YouTube watch-hour eligibility (that depends on YouTube's own policies, content, and traffic).</p>
+      <p class="hint" style="margin:-10px 0 20px">Streams your video to your real YouTube channel, on loop or once. This doesn't guarantee YouTube watch-hour eligibility — that depends on YouTube's own policies, content, and traffic.</p>
 
       <div class="card" id="replay-new-card">
-        <div class="section-title">New Channel</div>
+        <div class="section-title">New Stream</div>
         <div class="field"><label>Name</label><input id="replay-name" placeholder="My First Stream" /></div>
         <div class="field">
           <label>Source video</label>
@@ -411,7 +411,7 @@
         <div class="field">
           <p class="hint">Streams to your real YouTube channel. Needs a channel eligible for live streaming (phone-verified, no recent restrictions) and YouTube reconnected for live access. No pause — Stop ends the broadcast.</p>
         </div>
-        <div class="form-actions"><button class="btn primary" id="replay-create-btn">Create channel</button></div>
+        <div class="form-actions"><button class="btn primary" id="replay-create-btn">Create stream</button></div>
       </div>
 
       <div id="replay-channels"></div>
@@ -1251,7 +1251,7 @@ $("#replay-create-btn").onclick=async()=>{
       layout:$("#replay-layout").value,
       is_real:replayCreateIsReal,
     })});
-    toast("Channel created");
+    toast("Stream created");
     $("#replay-name").value="";
     replayUploadedSource=null;
     $("#replay-upload-status").textContent="";
@@ -1259,7 +1259,7 @@ $("#replay-create-btn").onclick=async()=>{
     $("#replay-url-status").textContent="";
     loadReplayChannels();
   }catch(e){toast(e.message,"err")}
-  finally{btn.disabled=false;btn.textContent="Create channel";}
+  finally{btn.disabled=false;btn.textContent="Create stream";}
 };
 
 window.deleteReplayChannel=async(id)=>{
