@@ -293,7 +293,16 @@ def _build_ffmpeg_command(source_path: str, rtmp_target: str, is_job_source: boo
                 "-map", "0:v:0", "-map", "1:a:0", "-shortest",
             ]
         command += [
+            # threads=1 (both flags - the top-level one limits ffmpeg's own
+            # pool, x264-params forces libx264's internal one) is required,
+            # not just a tuning choice: on this host's constrained
+            # process/thread budget, libx264's default auto-detected
+            # multi-threaded init reliably fails outright with "Error while
+            # opening encoder" - confirmed by reproducing the exact failure
+            # with a synthetic test source (no real file involved) and
+            # fixing it with this exact flag combination.
             "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
+            "-threads", "1", "-x264-params", "threads=1",
             "-b:v", "4500k", "-maxrate", "4500k", "-bufsize", "9000k",
             "-pix_fmt", "yuv420p", "-g", "60",
             "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
