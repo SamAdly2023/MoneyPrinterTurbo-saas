@@ -478,6 +478,7 @@
           <div class="card">
             <div class="section-title">Status</div>
             <p class="hint">Elapsed: <span id="studio-elapsed">00:00</span> · Loop <span id="studio-loop">1</span> · <span id="studio-source-name"></span></p>
+            <p class="hint" id="studio-stats-line" style="display:none">👁 <span id="studio-viewers">-</span> watching · <span id="studio-views">-</span> total views</p>
           </div>
         </div>
       </div>
@@ -1374,6 +1375,16 @@ async function refreshStudio(){
   $("#studio-elapsed").textContent=fmtElapsed(c.elapsed_seconds);
   $("#studio-loop").textContent=c.loop_count;
   $("#studio-source-name").textContent=c.output_format+" · "+c.layout;
+
+  if(c.is_real&&c.status==="live"){
+    $("#studio-stats-line").style.display="";
+    api("/replay/channels/"+currentChannelId+"/stats").then(s=>{
+      $("#studio-viewers").textContent=s.concurrent_viewers==null?"-":s.concurrent_viewers.toLocaleString();
+      $("#studio-views").textContent=s.view_count==null?"-":s.view_count.toLocaleString();
+    }).catch(()=>{});
+  }else{
+    $("#studio-stats-line").style.display="none";
+  }
 
   if(c.status==="ended"&&c.session&&c.session.ended_reason){
     const reasonText={completed:"finished automatically",manual:"stopped manually",process_stopped:"the stream stopped unexpectedly"}[c.session.ended_reason]||c.session.ended_reason;

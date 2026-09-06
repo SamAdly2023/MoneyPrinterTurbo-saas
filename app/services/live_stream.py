@@ -387,6 +387,46 @@ def stop_push(channel_id: str, pid) -> None:
             log_file.close()
 
 
+def get_live_stats(uid: str, video_id: str) -> dict:
+    """Concurrent viewers + total view count for a live broadcast, straight
+    from the videos resource (the broadcast id IS the video id). Cheap (1
+    quota unit) and safe to poll every few seconds from the Live Studio.
+
+    concurrentViewers only exists in the response while the broadcast is
+    actually live and only updates every ~1 minute on YouTube's side, so a
+    None here just means "not available yet" rather than an error. There is
+    no "watch hours" here - YouTube only exposes that through the separate
+    Analytics API, which reports with a data delay of a day or more (not a
+    live-dashboard metric) and needs its own OAuth scope this app doesn't
+    request - see replay.py's channel stats endpoint for how the frontend
+    is told to treat a missing value.
+    """
+    try:
+        headers = _yt_headers(uid)
+        r = requests.get(
+            f"{YOUTUBE_API}/videos",
+            params={"part": "liveStreamingDetails,statistics", "id": video_id},
+            headers=headers, timeout=15,
+        )
+        if not r.ok:
+            logger.warning(f"could not fetch live stats for {video_id}: {r.text[:300]}")
+            return {"concurrent_viewers": None, "view_count": None}
+        items = r.json().get("items") or []
+        if not items:
+            return {"concurrent_viewers": None, "view_count": None}
+        live_details = items[0].get("liveStreamingDetails", {})
+        stats = items[0].get("statistics", {})
+        concurrent = live_details.get("concurrentViewers")
+        views = stats.get("viewCount")
+        return {
+            "concurrent_viewers": int(concurrent) if concurrent is not None else None,
+            "view_count": int(views) if views is not None else None,
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"could not fetch live stats for {video_id}: {e}")
+        return {"concurrent_viewers": None, "view_count": None}
+
+
 def end_broadcast(uid: str, broadcast_id: str) -> None:
     """Best-effort manual transition to "complete" - used by stop() so the
     YouTube-side broadcast doesn't sit through the ~1 minute enableAutoStop

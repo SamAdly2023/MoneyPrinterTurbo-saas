@@ -1197,3 +1197,13 @@ def replay_stop(request: Request, channel_id: str = Path(...)):
     except ValueError as e:
         return utils.get_response(400, message=str(e))
     return utils.get_response(200, channel)
+
+
+@router.get("/saas/replay/channels/{channel_id}/stats", summary="Live viewer/view stats for a real replay channel")
+def replay_channel_stats(request: Request, channel_id: str = Path(...)):
+    uid = _uid(request)
+    try:
+        stats = replay.get_channel_stats(uid, channel_id)
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    return utils.get_response(200, stats)

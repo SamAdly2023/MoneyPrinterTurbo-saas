@@ -642,6 +642,24 @@ def stop(uid: str, channel_id: str) -> dict:
     return channel
 
 
+def get_channel_stats(uid: str, channel_id: str) -> dict:
+    """Concurrent viewers + total views for a real, live channel - live,
+    read-only, and never persisted (the Live Studio polls this directly
+    rather than it living on the channel dict). Returns Nones for anything
+    not real/live/broadcasting yet, same shape either way so the frontend
+    doesn't need two code paths.
+
+    No "watch hours" field: YouTube doesn't expose that in real time (see
+    live_stream.get_live_stats's docstring) - the frontend shows "-" for it
+    rather than a fabricated number."""
+    _, channel = _find(_load(uid)[1], channel_id)
+    if channel is None:
+        raise ValueError("channel not found")
+    if not (channel.get("is_real") and channel["status"] == STATUS_LIVE and channel.get("youtube_broadcast_id")):
+        return {"concurrent_viewers": None, "view_count": None}
+    return live_stream.get_live_stats(uid, channel["youtube_broadcast_id"])
+
+
 def _recompute(channel: dict) -> bool:
     """The one place elapsed time / loop count get computed, always fresh
     from persisted timestamps - never an in-memory counter. Mutates channel
