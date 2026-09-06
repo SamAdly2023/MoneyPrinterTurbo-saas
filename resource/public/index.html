@@ -464,6 +464,13 @@
             <button class="btn sm" id="studio-connect-yt-btn" style="display:none">▶ Connect YouTube</button>
             <p class="hint" id="studio-reconnect-hint" style="display:none;color:#f5c56b">This YouTube connection needs to be renewed for live streaming.</p>
           </div>
+          <div class="card" id="studio-meta-card" style="display:none">
+            <div class="section-title">YouTube title &amp; description</div>
+            <p class="hint">Auto-generated for this broadcast — used for a real channel's title/description/tags.</p>
+            <p style="font-weight:600;margin:6px 0 2px" id="studio-meta-title"></p>
+            <p class="hint" id="studio-meta-description" style="white-space:pre-wrap"></p>
+            <p class="hint" id="studio-meta-tags" style="color:var(--muted)"></p>
+          </div>
           <div class="card" id="studio-summary-card" style="display:none">
             <div class="section-title">Last session summary</div>
             <p class="hint" id="studio-summary-text"></p>
@@ -1243,7 +1250,7 @@ $("#replay-url-import-btn").onclick=async()=>{
 };
 
 $("#replay-create-btn").onclick=async()=>{
-  const name=$("#replay-name").value.trim()||"My First Stream";
+  const name=$("#replay-name").value.trim();
   let source_kind,source_ref;
   if(replaySourceTab==="upload"||replaySourceTab==="url"){
     if(!replayUploadedSource){toast(replaySourceTab==="url"?"Import a video first":"Upload a video first","err");return;}
@@ -1344,6 +1351,15 @@ async function refreshStudio(){
     : (c.is_real&&yt.needs_reconnect_for_live)
       ? "Reconnect YouTube (above) before going live."
       : "";
+
+  if(c.is_real&&c.youtube_metadata&&(c.youtube_metadata.title||c.youtube_metadata.description)){
+    $("#studio-meta-card").style.display="";
+    $("#studio-meta-title").textContent=c.youtube_metadata.title||"";
+    $("#studio-meta-description").textContent=c.youtube_metadata.description||"";
+    $("#studio-meta-tags").textContent=(c.youtube_metadata.tags||[]).length?"Tags: "+c.youtube_metadata.tags.join(", "):"";
+  }else{
+    $("#studio-meta-card").style.display="none";
+  }
 
   $("#studio-elapsed").textContent=fmtElapsed(c.elapsed_seconds);
   $("#studio-loop").textContent=c.loop_count;

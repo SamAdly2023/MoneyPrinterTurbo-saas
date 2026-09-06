@@ -24,12 +24,14 @@ no cross-user query need, so the lighter pattern is proportionate here.
 
 import ipaddress
 import os
+import shutil
 import socket
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 import requests
 from fastapi import UploadFile
+from loguru import logger
 
 from app.services import clips, firestore_db, live_stream, publish, saas
 from app.utils import utils
@@ -297,7 +299,7 @@ def create_channel(
     layout: str = "spotlight",
     is_real: bool = False,
 ) -> dict:
-    name = (name or "").strip() or "My First Stream"
+    name = (name or "").strip()
     if source_kind not in ("job", "upload"):
         raise ValueError("source_kind must be 'job' or 'upload'")
     replay_mode = replay_mode or "loop"
@@ -311,6 +313,7 @@ def create_channel(
         raise ValueError(f"unknown layout: {layout}")
 
     source_job_id = None
+    youtube_metadata = None
     if source_kind == "job":
         job = saas.store.get(uid, source_ref)
         if not job or job.get("status") != saas.STATUS_DONE or not job.get("videos"):
@@ -318,6 +321,20 @@ def create_channel(
         source_job_id = job["id"]
         video_url = job["videos"][0]
         duration_seconds = clips.probe_duration(_resolve_source_path(video_url))
+        # Carry over the title/description/tags AI already generated for
+        # this video (see saas.py's meta dict, also used for YouTube/TikTok
+        # publishing) instead of asking the user to redo that work for the
+        # broadcast - see go_live()'s real-channel branch, which sends this
+        # as the liveBroadcast's own snippet.
+        meta = job.get("meta") or {}
+        if meta.get("title") or meta.get("description") or meta.get("tags"):
+            youtube_metadata = {
+                "title": meta.get("title", ""),
+                "description": meta.get("description", ""),
+                "tags": meta.get("tags", []),
+            }
+            if not name and meta.get("title"):
+                name = meta["title"]
     else:
         video_url = source_ref
         if not video_url:
@@ -326,7 +343,34 @@ def create_channel(
         if not os.path.isfile(path):
             raise ValueError("uploaded video not found - try uploading again")
         duration_seconds = clips.probe_duration(path)
+        # An upload/import never went through the app's own script-writing
+        # step, so there's no pre-existing meta to carry over (unlike the
+        # job branch above) - transcribe whatever narration/dialogue the
+        # video actually has and run it through the exact same SEO-tuned
+        # metadata prompt a generated video gets (app/services/saas.py's
+        # generate_publish_metadata), so a real broadcast doesn't go out
+        # with a blank title/description/tags. transcribe_source already
+        # returns [] for a silent video - nothing to base metadata on, so
+        # this just naturally no-ops rather than needing a separate check.
+        try:
+            work_dir = os.path.join(saas.output_dir(), f"_replay-transcribe-{utils.get_uuid()}")
+            try:
+                segments = clips.transcribe_source(path, work_dir)
+            finally:
+                shutil.rmtree(work_dir, ignore_errors=True)
+            if segments:
+                transcript = clips.transcript_for_prompt(segments)
+                meta = saas.generate_publish_metadata(
+                    "", transcript, firestore_db.get_user_profile(uid), output_format,
+                )
+                if meta.get("title") or meta.get("description") or meta.get("tags"):
+                    youtube_metadata = meta
+                    if not name:
+                        name = meta.get("title") or name
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"could not auto-generate metadata for an imported replay source: {e}")
 
+    name = name or "My First Stream"
     now = _now_iso()
     channel = {
         "id": utils.get_uuid(),
@@ -342,6 +386,11 @@ def create_channel(
         "created_at": now,
         "updated_at": now,
         "is_real": bool(is_real),
+        # AI-generated title/description/tags carried over from the source
+        # job, if any (see above) - used as the real broadcast's snippet in
+        # go_live() instead of just the channel name. None for uploaded/
+        # imported sources, which never had this metadata generated.
+        "youtube_metadata": youtube_metadata,
         # Only ever set for a real channel, by go_live() in live_stream.py's
         # branch below - None for demo channels and before the first real
         # Go Live.
@@ -442,8 +491,12 @@ def go_live(uid: str, channel_id: str) -> dict:
                 "Your YouTube connection needs to be renewed for live streaming - "
                 "reconnect YouTube (Settings or the dashboard's YouTube button) and try again."
             )
+        yt_meta = channel.get("youtube_metadata") or {}
         try:
-            result = live_stream.create_broadcast_and_stream(uid, channel["name"])
+            result = live_stream.create_broadcast_and_stream(
+                uid, yt_meta.get("title") or channel["name"],
+                description=yt_meta.get("description", ""), tags=yt_meta.get("tags"),
+            )
             pid = live_stream.start_push_with_fallback(
                 channel["id"], path, result["rtmps_url"], result["rtmp_url"],
                 is_job_source=(channel["source_kind"] == "job"),
@@ -464,7 +517,9 @@ def go_live(uid: str, channel_id: str) -> dict:
         # phone-verified, which custom thumbnails also require) shouldn't
         # block Go Live; the ffmpeg push above already started regardless.
         try:
-            thumbnail = live_stream.generate_thumbnail(path, channel["name"], channel["duration_seconds"])
+            thumbnail = live_stream.generate_thumbnail(
+                path, yt_meta.get("title") or channel["name"], channel["duration_seconds"],
+            )
             live_stream.set_thumbnail(uid, result["broadcast_id"], thumbnail)
         except Exception:  # noqa: BLE001
             pass

@@ -75,7 +75,8 @@ def _yt_error(action: str, resp) -> RuntimeError:
     return RuntimeError(f"YouTube rejected {action} ({resp.status_code}): {text}")
 
 
-def create_broadcast_and_stream(uid: str, title: str, privacy: str = "public") -> dict:
+def create_broadcast_and_stream(uid: str, title: str, description: str = "",
+                                 tags: list | None = None, privacy: str = "public") -> dict:
     """liveBroadcasts.insert + liveStreams.insert + liveBroadcasts.bind.
 
     enableAutoStart/enableAutoStop mean the broadcast goes live on its own
@@ -88,7 +89,10 @@ def create_broadcast_and_stream(uid: str, title: str, privacy: str = "public") -
     title = (title or "Live Stream").strip()[:100] or "Live Stream"
 
     broadcast_body = {
-        "snippet": {"title": title, "scheduledStartTime": _now_iso()},
+        # description lives on liveBroadcasts.snippet directly; tags don't
+        # (that's a videos-resource-only field) - see _apply_video_tags,
+        # called below once the broadcast/video id exists.
+        "snippet": {"title": title, "description": (description or "")[:5000], "scheduledStartTime": _now_iso()},
         "status": {
             "privacyStatus": privacy if privacy in ("public", "unlisted", "private") else "public",
             "selfDeclaredMadeForKids": False,
@@ -103,6 +107,9 @@ def create_broadcast_and_stream(uid: str, title: str, privacy: str = "public") -
     if not b.ok:
         raise _yt_error("creating the live broadcast", b)
     broadcast_id = b.json()["id"]
+
+    if tags:
+        _apply_video_tags(uid, broadcast_id, tags)
 
     stream_body = {
         "snippet": {"title": title},
@@ -218,6 +225,36 @@ def set_thumbnail(uid: str, video_id: str, jpeg_bytes: bytes) -> None:
             logger.warning(f"thumbnail upload failed for {video_id} ({resp.status_code}): {resp.text[:300]}")
     except Exception as e:  # noqa: BLE001
         logger.warning(f"thumbnail generation/upload failed for {video_id}: {e}")
+
+
+def _apply_video_tags(uid: str, video_id: str, tags: list) -> None:
+    """Best-effort - never raises. Tags live on the videos resource, not
+    liveBroadcasts.snippet (which only has title/description) - a live
+    broadcast is also reachable as a video by the same id, but videos.update
+    replaces the whole snippet part, so this reads the current one first
+    (already populated from broadcast creation - title, categoryId, etc.)
+    and only adds tags on top, rather than guessing values like categoryId
+    that would otherwise get reset to nothing."""
+    try:
+        headers = _yt_headers(uid)
+        get_resp = requests.get(
+            f"{YOUTUBE_API}/videos", params={"part": "snippet", "id": video_id},
+            headers=headers, timeout=30,
+        )
+        items = get_resp.json().get("items", []) if get_resp.ok else []
+        if not items:
+            logger.warning(f"could not fetch video snippet to set tags for {video_id}")
+            return
+        snippet = items[0]["snippet"]
+        snippet["tags"] = [str(t)[:100] for t in tags][:500]
+        resp = requests.put(
+            f"{YOUTUBE_API}/videos", params={"part": "snippet"},
+            headers=headers, json={"id": video_id, "snippet": snippet}, timeout=30,
+        )
+        if not resp.ok:
+            logger.warning(f"setting tags failed for {video_id} ({resp.status_code}): {resp.text[:300]}")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"setting tags failed for {video_id}: {e}")
 
 
 def _has_audio_stream(source_path: str) -> bool:
