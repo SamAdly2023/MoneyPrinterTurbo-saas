@@ -774,8 +774,16 @@ def combine_videos(
     # merge video clips progressively, avoid loading all videos at once to avoid memory overflow
     logger.info("starting clip merging process")
     if not processed_clips:
-        logger.warning("no clips available for merging")
-        return combined_video_path
+        # Silently returning combined_video_path here (a path that was never
+        # actually written to) used to let the job limp forward into
+        # generate_video(), which then crashed with a confusing "file not
+        # found" - the real problem (no usable stock footage could be found
+        # or downloaded for this script/keywords) never surfaced. Fail
+        # clearly at the actual point of failure instead.
+        raise RuntimeError(
+            "no usable video clips were found or downloaded for this script - "
+            "check the configured video source/API keys, or try different keywords"
+        )
     
     # if there is only one clip, use it directly
     if len(processed_clips) == 1:
