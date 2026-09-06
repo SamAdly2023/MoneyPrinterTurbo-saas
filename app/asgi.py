@@ -184,6 +184,10 @@ def shutdown_event():
 def startup_event():
     logger.info("startup event")
     # Auto-start the video creation engine so saved scripts run one-by-one.
-    from app.services import saas
+    from app.services import replay, saas
 
     saas.engine.start()
+    # Auto-restarts real replay channels whose ffmpeg push died on its own
+    # (crash, network drop, this very app process being recycled) so a
+    # stream keeps running until the user clicks Stop.
+    replay.start_watchdog()

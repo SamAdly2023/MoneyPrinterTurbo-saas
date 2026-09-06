@@ -26,6 +26,8 @@ import ipaddress
 import os
 import shutil
 import socket
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
@@ -398,6 +400,13 @@ def create_channel(
         "youtube_stream_id": None,
         "youtube_watch_url": None,
         "ffmpeg_pid": None,
+        # True while a real channel should be kept running - the background
+        # watchdog (see start_watchdog()) restarts it automatically if the
+        # ffmpeg push dies on its own. stop() sets this False so a
+        # deliberate Stop click doesn't get immediately undone by the next
+        # watchdog tick.
+        "auto_restart": True,
+        "restart_count": 0,
         "session": {
             "started_at": None,
             "paused_at": None,
@@ -469,12 +478,16 @@ def delete_channel(uid: str, channel_id: str) -> None:
 # --------------------------------------------------------------------------- #
 # Broadcast state machine - see _recompute() for the one timer formula
 # --------------------------------------------------------------------------- #
-def go_live(uid: str, channel_id: str) -> dict:
+def go_live(uid: str, channel_id: str, force: bool = False) -> dict:
+    """force=True is for the watchdog only (see _watchdog_tick()) - it
+    restarts a channel that's already marked STATUS_LIVE in our records but
+    whose ffmpeg push has actually died, so the "already broadcasting" guard
+    below has to be bypassed for that one caller."""
     profile, channels = _load(uid)
     idx, channel = _find(channels, channel_id)
     if channel is None:
         raise ValueError("channel not found")
-    if channel["status"] in (STATUS_LIVE, STATUS_PAUSED):
+    if channel["status"] in (STATUS_LIVE, STATUS_PAUSED) and not force:
         raise ValueError("this channel is already broadcasting")
 
     path = _resolve_source_path(channel["source_video_url"])
@@ -512,6 +525,9 @@ def go_live(uid: str, channel_id: str) -> dict:
         channel["youtube_stream_id"] = result["stream_id"]
         channel["youtube_watch_url"] = result["watch_url"]
         channel["ffmpeg_pid"] = pid
+        channel["auto_restart"] = True
+        if force:
+            channel["restart_count"] = int(channel.get("restart_count") or 0) + 1
 
         # Best-effort - a thumbnail failure (e.g. the channel isn't
         # phone-verified, which custom thumbnails also require) shouldn't
@@ -526,15 +542,19 @@ def go_live(uid: str, channel_id: str) -> dict:
 
     now = _now_iso()
     channel["status"] = STATUS_LIVE
-    channel["session"] = {
-        "started_at": now,
-        "paused_at": None,
-        "accumulated_paused_seconds": 0.0,
-        "ended_at": None,
-        "ended_reason": None,
-        "destination_platform": "youtube",
-        "destination_label": youtube.get("channel") or "",
-    }
+    if not force:
+        # A forced (watchdog) restart keeps the existing session - it's the
+        # same logical broadcast continuing after an unwanted interruption,
+        # not a new user-initiated Go Live.
+        channel["session"] = {
+            "started_at": now,
+            "paused_at": None,
+            "accumulated_paused_seconds": 0.0,
+            "ended_at": None,
+            "ended_reason": None,
+            "destination_platform": "youtube",
+            "destination_label": youtube.get("channel") or "",
+        }
     channel["updated_at"] = now
     _recompute(channel)
     _save(uid, profile, channels)
@@ -596,6 +616,10 @@ def stop(uid: str, channel_id: str) -> dict:
         raise ValueError("channel isn't broadcasting")
 
     if channel.get("is_real"):
+        # Must be set before stop_push() - the watchdog polls independently
+        # of this request and must never resurrect a broadcast the user is
+        # deliberately ending right now.
+        channel["auto_restart"] = False
         live_stream.stop_push(channel["id"], channel.get("ffmpeg_pid"))
         if channel.get("youtube_broadcast_id"):
             live_stream.end_broadcast(uid, channel["youtube_broadcast_id"])
@@ -637,22 +661,28 @@ def _recompute(channel: dict) -> bool:
     if status == STATUS_LIVE and channel.get("is_real") and not live_stream.is_alive(channel["id"], channel.get("ffmpeg_pid")):
         # The ffmpeg push died on its own - a crash, a network drop, the
         # host killing a long-running process, or (for replay_mode=="once")
-        # simply reaching EOF and exiting cleanly. Either way the broadcast
-        # is no longer actually live; reflect that rather than showing
-        # "live" for a stream that stopped streaming. Unlike the once-mode
-        # demo case below, there's no way to know the exact moment it died,
-        # only that it's confirmed dead by now - "now" is the best available
-        # ended_at.
+        # simply reaching EOF and exiting cleanly.
         duration_reached = (
             (_now() - started_at).total_seconds() - session["accumulated_paused_seconds"] >= duration
         )
-        ended_at = _now()
-        session["ended_at"] = ended_at.isoformat()
-        session["ended_reason"] = "completed" if (channel["replay_mode"] == "once" and duration_reached) else "process_stopped"
-        channel["status"] = STATUS_ENDED
-        status = STATUS_ENDED
-        changed = True
-        just_ended_real = True
+        natural_completion = channel["replay_mode"] == "once" and duration_reached
+
+        if channel.get("auto_restart", True) and not natural_completion:
+            # Don't give up on it - leave status as "live" so the channel
+            # still reads as broadcasting. start_watchdog()'s background
+            # loop polls is_alive() independently and will call
+            # go_live(..., force=True) to bring up a fresh broadcast within
+            # its next tick, rather than us ending the channel here just
+            # because this particular process died.
+            just_ended_real = False
+        else:
+            ended_at = _now()
+            session["ended_at"] = ended_at.isoformat()
+            session["ended_reason"] = "completed" if natural_completion else "process_stopped"
+            channel["status"] = STATUS_ENDED
+            status = STATUS_ENDED
+            changed = True
+            just_ended_real = True
     else:
         just_ended_real = False
 
@@ -699,3 +729,68 @@ def _recompute(channel: dict) -> bool:
             "ended_reason": session.get("ended_reason"),
         }
     return changed
+
+
+# --------------------------------------------------------------------------- #
+# Watchdog - keeps real channels streaming across ffmpeg crashes, network
+# drops, and the app process itself being recycled by the host, so a channel
+# stays live (as far as watch-hours are concerned) until the user clicks
+# Stop, not until whatever killed the ffmpeg process happened to strike.
+# --------------------------------------------------------------------------- #
+_WATCHDOG_INTERVAL_SECONDS = 30
+_watchdog_started = False
+
+
+def _watchdog_tick() -> None:
+    try:
+        users = firestore_db.list_users()
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"replay watchdog: couldn't list users: {e}")
+        return
+
+    for user in users:
+        uid = user.get("uid")
+        if not uid:
+            continue
+        try:
+            profile = firestore_db.get_user_profile(uid)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"replay watchdog: couldn't load profile for {uid}: {e}")
+            continue
+
+        for channel in profile.get("replay_channels") or []:
+            if not channel.get("is_real"):
+                continue
+            if channel.get("status") != STATUS_LIVE:
+                continue
+            if not channel.get("auto_restart", True):
+                continue
+            if live_stream.is_alive(channel["id"], channel.get("ffmpeg_pid")):
+                continue
+
+            logger.warning(
+                f"replay watchdog: channel {channel['id']} (user {uid}) is live but its "
+                "ffmpeg push died - restarting"
+            )
+            try:
+                go_live(uid, channel["id"], force=True)
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"replay watchdog: failed to restart channel {channel['id']}: {e}")
+
+
+def start_watchdog() -> None:
+    """Idempotent - safe to call more than once. Runs _watchdog_tick() on a
+    daemon thread every _WATCHDOG_INTERVAL_SECONDS for the life of the
+    process; wired into app/asgi.py's startup_event."""
+    global _watchdog_started
+    if _watchdog_started:
+        return
+    _watchdog_started = True
+
+    def _loop():
+        while True:
+            time.sleep(_WATCHDOG_INTERVAL_SECONDS)
+            _watchdog_tick()
+
+    threading.Thread(target=_loop, name="replay-watchdog", daemon=True).start()
+    logger.info("replay watchdog started")
