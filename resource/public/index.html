@@ -409,12 +409,7 @@
         <div class="field"><label>Layout</label>
           <select id="replay-layout"><option value="spotlight">Spotlight</option><option value="speaker">Speaker</option><option value="grid">Grid</option></select></div>
         <div class="field">
-          <label>Broadcast type</label>
-          <div style="display:flex;gap:10px;margin-bottom:6px">
-            <button class="btn sm" id="replay-type-demo" type="button">Simulated demo</button>
-            <button class="btn sm ghost" id="replay-type-real" type="button">Real YouTube Live</button>
-          </div>
-          <p class="hint" id="replay-type-hint">Loops playback locally for your own reference — no real broadcast is sent.</p>
+          <p class="hint">Streams to your real YouTube channel. Needs a channel eligible for live streaming (phone-verified, no recent restrictions) and YouTube reconnected for live access. No pause — Stop ends the broadcast.</p>
         </div>
         <div class="form-actions"><button class="btn primary" id="replay-create-btn">Create channel</button></div>
       </div>
@@ -425,7 +420,7 @@
     <!-- LIVE STUDIO -->
     <section class="view" id="view-replay-studio">
       <div class="page-head">
-        <div><h2 id="studio-name">Live Studio</h2><p id="studio-subhead">Demo broadcast — simulated 24/7 loop playback, not a real YouTube Live stream.</p></div>
+        <div><h2 id="studio-name">Live Studio</h2><p id="studio-subhead">Real YouTube Live broadcast — sent to your connected channel. No pause; Stop ends it.</p></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
           <span class="pill" id="studio-status-pill">Idle</span>
           <button class="btn ghost sm" data-view="replay">← Channels</button>
@@ -1153,21 +1148,8 @@ const REPLAY_STATUS_META={
 let currentChannelId=null;
 let replaySourcesCache=[];
 let replayUploadedSource=null; // {video_url, duration_seconds} once uploaded
-let replayCreateIsReal=false;
+const replayCreateIsReal=true; // every channel is a real YouTube Live broadcast now - no simulated-demo option
 let studioPollTimer=null;
-
-$("#replay-type-demo").onclick=()=>{
-  replayCreateIsReal=false;
-  $("#replay-type-demo").classList.remove("ghost");
-  $("#replay-type-real").classList.add("ghost");
-  $("#replay-type-hint").textContent="Loops playback locally for your own reference — no real broadcast is sent.";
-};
-$("#replay-type-real").onclick=()=>{
-  replayCreateIsReal=true;
-  $("#replay-type-real").classList.remove("ghost");
-  $("#replay-type-demo").classList.add("ghost");
-  $("#replay-type-hint").textContent="Streams to your real YouTube channel. Needs a channel eligible for live streaming (phone-verified, no recent restrictions) and YouTube reconnected for live access. No pause — Stop ends the broadcast.";
-};
 
 let replaySourceTab="job";
 function setReplaySourceTab(tab){
@@ -1397,7 +1379,7 @@ async function refreshStudio(){
 
 $("#studio-connect-yt-btn").onclick=()=>connectPlatform("youtube");
 $("#studio-golive-btn").onclick=async()=>{
-  try{await api("/replay/channels/"+currentChannelId+"/go-live",{method:"POST"});toast("Broadcast started (simulated)");refreshStudio();}
+  try{await api("/replay/channels/"+currentChannelId+"/go-live",{method:"POST"});toast("Broadcast started");refreshStudio();}
   catch(e){toast(e.message,"err")}
 };
 $("#studio-pause-btn").onclick=async()=>{
