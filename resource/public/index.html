@@ -1296,8 +1296,18 @@ function stopStudioPoll(){if(studioPollTimer){clearInterval(studioPollTimer);stu
 
 function fmtElapsed(sec){
   sec=Math.max(0,Math.round(sec||0));
-  const m=Math.floor(sec/60),s=sec%60;
-  return String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
+  if(sec<60)return sec+"s";
+  const units=[["mo",2592000],["w",604800],["d",86400],["h",3600],["m",60],["s",1]];
+  let remaining=sec,parts=[];
+  for(const [label,size] of units){
+    if(remaining>=size){
+      const val=Math.floor(remaining/size);
+      remaining-=val*size;
+      parts.push(val+label);
+      if(parts.length===2)break;
+    }
+  }
+  return parts.join(" ");
 }
 
 async function refreshStudio(){
