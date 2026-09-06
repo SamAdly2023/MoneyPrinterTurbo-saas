@@ -261,6 +261,32 @@ def search_videos_coverr(
     return []
 
 
+def _is_readable_video(video_path: str) -> bool:
+    """Container metadata alone (duration/fps) isn't enough - a download
+    interrupted partway through can leave a file with a perfectly valid
+    header but truncated/corrupted frame data later in the stream, which
+    only surfaces as a hard crash much later when something actually reads
+    that part of the file (see save_video's cache-hit path below, which
+    used to skip this check entirely for a cached file)."""
+    clip = None
+    try:
+        clip = VideoFileClip(video_path)
+        if not (clip.duration > 0 and clip.fps > 0):
+            return False
+        clip.get_frame(0)
+        clip.get_frame(max(0.0, clip.duration - 0.1))
+        return True
+    except Exception as e:
+        logger.warning(f"invalid video file: {video_path} => {str(e)}")
+        return False
+    finally:
+        if clip is not None:
+            try:
+                clip.close()
+            except Exception as close_error:
+                logger.warning(f"failed to close video clip: {video_path}, error: {str(close_error)}")
+
+
 def save_video(video_url: str, save_dir: str = "") -> str:
     if not save_dir:
         save_dir = utils.storage_dir("cache_videos")
@@ -273,10 +299,21 @@ def save_video(video_url: str, save_dir: str = "") -> str:
     video_id = f"vid-{url_hash}"
     video_path = f"{save_dir}/{video_id}.mp4"
 
-    # if video already exists, return the path
+    # if video already exists, verify it's still actually a good, fully
+    # readable video before trusting it - not just non-empty. A previous
+    # download that got interrupted partway through could otherwise poison
+    # the cache indefinitely: every job that needs this same clip would hit
+    # the exact same crash, forever, until someone noticed and deleted the
+    # file by hand.
     if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
-        logger.info(f"video already exists: {video_path}")
-        return video_path
+        if _is_readable_video(video_path):
+            logger.info(f"video already exists: {video_path}")
+            return video_path
+        logger.warning(f"cached video is corrupted, re-downloading: {video_path}")
+        try:
+            os.remove(video_path)
+        except Exception as remove_error:
+            logger.warning(f"failed to remove corrupted cached video: {video_path}, error: {str(remove_error)}")
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
@@ -295,29 +332,12 @@ def save_video(video_url: str, save_dir: str = "") -> str:
         )
 
     if os.path.exists(video_path) and os.path.getsize(video_path) > 0:
-        clip = None
+        if _is_readable_video(video_path):
+            return video_path
         try:
-            clip = VideoFileClip(video_path)
-            duration = clip.duration
-            fps = clip.fps
-            if duration > 0 and fps > 0:
-                return video_path
-        except Exception as e:
-            logger.warning(f"invalid video file: {video_path} => {str(e)}")
-            try:
-                os.remove(video_path)
-            except Exception as remove_error:
-                logger.warning(
-                    f"failed to remove invalid video file: {video_path}, error: {str(remove_error)}"
-                )
-        finally:
-            if clip is not None:
-                try:
-                    clip.close()
-                except Exception as close_error:
-                    logger.warning(
-                        f"failed to close video clip: {video_path}, error: {str(close_error)}"
-                    )
+            os.remove(video_path)
+        except Exception as remove_error:
+            logger.warning(f"failed to remove invalid video file: {video_path}, error: {str(remove_error)}")
     return ""
 
 
