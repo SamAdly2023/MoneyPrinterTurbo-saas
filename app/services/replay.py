@@ -34,6 +34,7 @@ from urllib.parse import urlparse
 import requests
 from fastapi import UploadFile
 from loguru import logger
+from moviepy import VideoFileClip
 
 from app.services import clips, firestore_db, live_stream, publish, saas
 from app.utils import utils
@@ -90,6 +91,34 @@ def list_sources(uid: str) -> list[dict]:
     ]
 
 
+def _is_readable_video(video_path: str) -> bool:
+    """Container metadata alone (duration/fps) isn't enough - a download or
+    upload interrupted partway through can leave a file with a perfectly
+    valid header but truncated/corrupted frame data later in the stream,
+    which only surfaces as a hard crash much later when go_live() actually
+    reads a frame (same failure mode material.py's save_video() guards
+    against for job-rendering's stock-footage cache - confirmed here via a
+    real "failed to read the first frame" crash on a replay upload that had
+    no such check)."""
+    clip = None
+    try:
+        clip = VideoFileClip(video_path)
+        if not (clip.duration > 0 and clip.fps > 0):
+            return False
+        clip.get_frame(0)
+        clip.get_frame(max(0.0, clip.duration - 0.1))
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"invalid video file: {video_path} => {e}")
+        return False
+    finally:
+        if clip is not None:
+            try:
+                clip.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
 def save_replay_upload(uid: str, file: UploadFile) -> dict:
     """Secondary path: upload a fresh video, independent of any job. Same
     chunked-write-with-cap idiom as saas.py's upload_clip_source, but (like
@@ -115,6 +144,8 @@ def save_replay_upload(uid: str, file: UploadFile) -> dict:
                 out.write(chunk)
         if size == 0:
             raise ValueError("uploaded file is empty")
+        if not _is_readable_video(dest_path):
+            raise ValueError("that video file appears to be corrupted or incomplete - try uploading it again")
         duration = clips.probe_duration(dest_path)
     except Exception:
         if os.path.isfile(dest_path):
@@ -195,6 +226,8 @@ def _download_direct_file(url: str) -> dict:
                     out.write(chunk)
         if size == 0:
             raise ValueError("downloaded file is empty")
+        if not _is_readable_video(dest_path):
+            raise ValueError("that video file appears to be corrupted or incomplete - try that link again")
         duration = clips.probe_duration(dest_path)
     except Exception:
         if os.path.isfile(dest_path):
@@ -245,6 +278,8 @@ def _import_via_ytdlp(url: str) -> dict:
         ext = os.path.splitext(actual_path)[1].lower()
         if ext not in ALLOWED_UPLOAD_EXTS:
             raise ValueError(f"that link produced an unsupported format: {ext or 'unknown'}")
+        if not _is_readable_video(actual_path):
+            raise ValueError("the imported video appears to be corrupted or incomplete - try that link again")
         duration = float(info.get("duration") or 0) or clips.probe_duration(actual_path)
         filename = os.path.basename(actual_path)
     except yt_dlp.utils.DownloadError as e:

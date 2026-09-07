@@ -1167,13 +1167,20 @@ def replay_delete_channel(request: Request, channel_id: str = Path(...)):
     return utils.get_response(200, {"deleted": channel_id})
 
 
-@router.post("/saas/replay/channels/{channel_id}/go-live", summary="Start a simulated 24/7 replay broadcast")
+@router.post("/saas/replay/channels/{channel_id}/go-live", summary="Start a real 24/7 replay broadcast")
 def replay_go_live(request: Request, channel_id: str = Path(...)):
     uid = _uid(request)
     try:
         channel = replay.go_live(uid, channel_id)
     except ValueError as e:
         return utils.get_response(400, message=str(e))
+    except Exception as e:  # noqa: BLE001
+        # e.g. a moviepy crash reading a corrupted source file that slipped
+        # past _is_readable_video() some other way - without this, anything
+        # but our own ValueErrors escaped uncaught with no log trail (per a
+        # live incident: the request never even showed up in the app log).
+        logger.error(f"go-live failed for {uid}/{channel_id}: {e}")
+        return utils.get_response(500, message="couldn't go live - please try again")
     return utils.get_response(200, channel)
 
 
@@ -1204,6 +1211,9 @@ def replay_stop(request: Request, channel_id: str = Path(...)):
         channel = replay.stop(uid, channel_id)
     except ValueError as e:
         return utils.get_response(400, message=str(e))
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"stop failed for {uid}/{channel_id}: {e}")
+        return utils.get_response(500, message="couldn't stop the broadcast - please try again")
     return utils.get_response(200, channel)
 
 
