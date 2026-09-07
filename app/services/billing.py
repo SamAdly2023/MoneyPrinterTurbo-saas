@@ -191,19 +191,51 @@ def _billing_plan_id() -> str:
     return plan_id
 
 
-def create_subscription(uid: str) -> dict:
+def _create_subscription(plan_id: str, custom_id: str) -> dict:
     resp = requests.post(
         f"{_api_base()}/v1/billing/subscriptions",
         headers=_headers(),
         json={
-            "plan_id": _billing_plan_id(),
-            "custom_id": uid,
+            "plan_id": plan_id,
+            "custom_id": custom_id,
         },
         timeout=30,
     )
     if not resp.ok:
         raise RuntimeError(f"PayPal subscription creation failed ({resp.status_code}): {resp.text[:300]}")
     return resp.json()
+
+
+def create_subscription(uid: str) -> dict:
+    """Auto Mode subscription - custom_id is the bare uid (see
+    handle_webhook_event, which treats a bare uid as an Auto Mode event and
+    anything shaped "uid:streams:tier" as a Streams-plan event)."""
+    return _create_subscription(_billing_plan_id(), uid)
+
+
+# --------------------------------------------------------------------------- #
+# Streams plans - a second, independent set of PayPal Billing Plans (one per
+# tier) reusing the exact same Subscriptions API as Auto Mode above. Real
+# limits (concurrent streams, max duration) live in app/services/replay.py's
+# STREAMS_PLANS - this module only knows about price and PayPal plan id per
+# tier, both admin-configurable, so adding a tier is just data in both places.
+# --------------------------------------------------------------------------- #
+def streams_plan_price(tier: str) -> float:
+    return float(_global().get(f"streams_{tier}_price_usd") or 0.0)
+
+
+def _streams_billing_plan_id(tier: str) -> str:
+    plan_id = _global().get(f"paypal_streams_{tier}_plan_id", "")
+    if not plan_id:
+        raise ValueError(
+            f"No PayPal Billing Plan is configured for the Streams '{tier}' tier yet. "
+            "Create one in the PayPal dashboard and paste its ID into Settings."
+        )
+    return plan_id
+
+
+def create_streams_subscription(uid: str, tier: str) -> dict:
+    return _create_subscription(_streams_billing_plan_id(tier), f"{uid}:streams:{tier}")
 
 
 def verify_webhook_signature(headers: dict, body: bytes) -> bool:
@@ -240,17 +272,33 @@ def verify_webhook_signature(headers: dict, body: bytes) -> bool:
 
 
 def handle_webhook_event(event: dict) -> None:
+    """Both Auto Mode and every Streams tier are separate PayPal Billing
+    Plans sharing this one webhook, distinguished only by custom_id's shape:
+    a bare uid is Auto Mode (see create_subscription); "uid:streams:tier" is
+    a Streams-plan subscription (see create_streams_subscription)."""
     event_type = event.get("event_type", "")
     resource = event.get("resource", {})
+    custom_id = resource.get("custom_id", "")
+    if not custom_id:
+        logger.info(f"unhandled PayPal webhook event: {event_type} (no custom_id)")
+        return
+
+    uid, sep, rest = custom_id.partition(":streams:")
+    is_streams = bool(sep)
+    tier = rest if is_streams else ""
 
     if event_type == "BILLING.SUBSCRIPTION.ACTIVATED":
-        uid = resource.get("custom_id", "")
-        if uid:
+        if is_streams:
+            firestore_db.set_streams_plan(uid, tier)
+            logger.success(f"Streams '{tier}' plan activated for {uid}")
+        else:
             firestore_db.set_auto_mode_subscription(uid, True)
             logger.success(f"Auto Mode subscription activated for {uid}")
     elif event_type in ("BILLING.SUBSCRIPTION.CANCELLED", "BILLING.SUBSCRIPTION.SUSPENDED", "BILLING.SUBSCRIPTION.EXPIRED"):
-        uid = resource.get("custom_id", "")
-        if uid:
+        if is_streams:
+            firestore_db.set_streams_plan(uid, "free")
+            logger.info(f"Streams '{tier}' plan ended for {uid} ({event_type}) - reverted to free")
+        else:
             firestore_db.set_auto_mode_subscription(uid, False)
             logger.info(f"Auto Mode subscription ended for {uid} ({event_type})")
     else:

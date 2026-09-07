@@ -47,6 +47,33 @@ REPLAY_MODES = {"loop", "once"}
 OUTPUT_FORMATS = {"9:16", "16:9", "1:1"}
 LAYOUTS = {"spotlight", "speaker", "grid"}
 
+# --------------------------------------------------------------------------- #
+# Streams plans - a real (not simulated) free tier plus paid tiers priced per
+# how many real broadcasts a user can run at once, modeled on how competing
+# 24/7-streaming products (e.g. playout.video) price this specific feature:
+# recurring subscription tiers gated on concurrent-stream count, not the
+# one-time credit system app/services/billing.py already uses for video
+# generation. Billing/PayPal wiring lives in billing.py
+# (create_streams_subscription/handle_webhook_event); this dict is the only
+# place the actual limits live, so adding a tier is one entry here plus one
+# admin-configured PayPal plan id/price, no other code changes.
+# --------------------------------------------------------------------------- #
+STREAMS_PLANS = {
+    "free": {"label": "Free", "max_concurrent": 1, "max_duration_hours": 5},
+    "starter": {"label": "Starter", "max_concurrent": 3, "max_duration_hours": None},
+    "pro": {"label": "Pro", "max_concurrent": 10, "max_duration_hours": None},
+}
+DEFAULT_STREAMS_PLAN = "free"
+
+
+def get_streams_plan(uid: str) -> str:
+    plan = (firestore_db.get_user(uid) or {}).get("streams_plan") or DEFAULT_STREAMS_PLAN
+    return plan if plan in STREAMS_PLANS else DEFAULT_STREAMS_PLAN
+
+
+def get_streams_plan_limits(uid: str) -> dict:
+    return STREAMS_PLANS[get_streams_plan(uid)]
+
 ALLOWED_UPLOAD_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # a short "on-loop" source video, not a raw long-form upload
 _UPLOAD_PREFIX = "_replay-src-"
@@ -505,6 +532,21 @@ def go_live(uid: str, channel_id: str, force: bool = False) -> dict:
     if not youtube.get("connected"):
         raise ValueError("connect YouTube before going live")
 
+    if channel.get("is_real") and not force:
+        # force=True is the watchdog restarting a channel that's already
+        # STATUS_LIVE in our own records (see run_watchdog_tick) - it isn't
+        # a new concurrent stream, so it must never be blocked by this cap.
+        limits = get_streams_plan_limits(uid)
+        live_count = sum(
+            1 for c in channels
+            if c["id"] != channel_id and c.get("is_real") and c["status"] == STATUS_LIVE
+        )
+        if live_count >= limits["max_concurrent"]:
+            raise ValueError(
+                f"your {limits['label']} plan allows {limits['max_concurrent']} concurrent "
+                f"stream(s) - stop another stream or upgrade your plan to go live with this one."
+            )
+
     if channel.get("is_real"):
         if publish.youtube_needs_reconnect(uid):
             raise ValueError(
@@ -562,6 +604,13 @@ def go_live(uid: str, channel_id: str, force: bool = False) -> dict:
             "destination_platform": "youtube",
             "destination_label": youtube.get("channel") or "",
         }
+        # Snapshotted at go-live time (not looked up fresh in _recompute)
+        # so an upgrade/downgrade mid-broadcast doesn't retroactively change
+        # an already-running stream's cap, and so _recompute() - called very
+        # frequently - never needs a DB round trip.
+        channel["max_duration_hours"] = (
+            get_streams_plan_limits(uid)["max_duration_hours"] if channel.get("is_real") else None
+        )
     channel["updated_at"] = now
     _recompute(channel)
     _save(uid, profile, channels)
@@ -788,6 +837,21 @@ def run_watchdog_tick() -> None:
                 continue
             if channel.get("status") != STATUS_LIVE:
                 continue
+
+            max_hours = channel.get("max_duration_hours")
+            if max_hours:
+                started_at = _parse_iso((channel.get("session") or {}).get("started_at"))
+                if started_at and (_now() - started_at).total_seconds() >= max_hours * 3600:
+                    logger.info(
+                        f"replay watchdog: channel {channel['id']} (user {uid}) hit its "
+                        f"plan's {max_hours}h cap - stopping"
+                    )
+                    try:
+                        stop(uid, channel["id"])
+                    except Exception as e:  # noqa: BLE001
+                        logger.error(f"replay watchdog: failed to stop capped channel {channel['id']}: {e}")
+                    continue
+
             if not channel.get("auto_restart", True):
                 continue
             if live_stream.is_alive(channel["id"], channel.get("ffmpeg_pid")):

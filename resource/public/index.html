@@ -377,6 +377,12 @@
       <div class="page-head"><div><h2>Streams</h2><p>Loop one of your videos as a real 24/7 YouTube Live stream.</p></div></div>
       <p class="hint" style="margin:-10px 0 20px">Streams your video to your real YouTube channel, on loop or once. This doesn't guarantee YouTube watch-hour eligibility — that depends on YouTube's own policies, content, and traffic.</p>
 
+      <div class="card" id="streams-plan-card">
+        <div class="section-title">Your plan</div>
+        <p class="hint" id="streams-plan-status">Loading…</p>
+        <div class="grid2" id="streams-plan-tiers" style="margin-top:10px"></div>
+      </div>
+
       <div class="card" id="replay-new-card">
         <div class="section-title">New Stream</div>
         <div class="field"><label>Name</label><input id="replay-name" placeholder="My First Stream" /></div>
@@ -698,6 +704,10 @@
           <div class="field"><label>Webhook ID <span class="desc">from PayPal's Webhooks setup page</span></label><input id="s-pp-webhook" placeholder="..." /></div>
           <div class="field"><label>Price per credit (USD)</label><input id="s-pp-credit-price" type="number" min="0" step="0.01" placeholder="0.75" /></div>
           <div class="field"><label>Auto Mode price (USD/month)</label><input id="s-pp-automode-price" type="number" min="0" step="0.01" placeholder="29.00" /></div>
+          <div class="field"><label>Streams Starter Billing Plan ID <span class="desc">create once in the PayPal dashboard</span></label><input id="s-pp-streams-starter-plan" placeholder="P-..." /></div>
+          <div class="field"><label>Streams Starter price (USD/month)</label><input id="s-pp-streams-starter-price" type="number" min="0" step="0.01" placeholder="9.00" /></div>
+          <div class="field"><label>Streams Pro Billing Plan ID <span class="desc">create once in the PayPal dashboard</span></label><input id="s-pp-streams-pro-plan" placeholder="P-..." /></div>
+          <div class="field"><label>Streams Pro price (USD/month)</label><input id="s-pp-streams-pro-price" type="number" min="0" step="0.01" placeholder="29.00" /></div>
         </div>
 
         <div class="section-title">Email notifications</div>
@@ -755,7 +765,7 @@ function show(view){
   if(view==="profile")loadProfile();
   if(view==="api")loadApiKey();
   if(view==="credits")loadCredits();
-  if(view==="replay")loadReplayChannels();
+  if(view==="replay"){loadReplayChannels();loadStreamsPlan();}
   if(view!=="replay-studio")stopStudioPoll();
   if(view==="new"){
     if(currentProfile.video_aspect)$("#f-aspect").value=currentProfile.video_aspect;
@@ -1169,6 +1179,42 @@ async function loadReplayChannels(){
   try{
     const cd=await api("/replay/channels");
     renderReplayChannels(cd.channels||[]);
+  }catch(e){toast(e.message,"err")}
+}
+
+async function loadStreamsPlan(){
+  const statusEl=$("#streams-plan-status");
+  const grid=$("#streams-plan-tiers");
+  try{
+    const [plans,channelsResp]=await Promise.all([api("/streams/plans"),api("/replay/channels")]);
+    const liveCount=(channelsResp.channels||[]).filter(c=>c.is_real&&c.status==="live").length;
+    const current=plans.tiers.find(t=>t.id===plans.current_plan)||plans.tiers[0];
+    statusEl.textContent=`${current.label} plan — ${liveCount}/${current.max_concurrent} concurrent stream(s)`
+      +(current.max_duration_hours?`, max ${current.max_duration_hours}h per broadcast`:"");
+    grid.innerHTML=plans.tiers.map(t=>{
+      const isCurrent=t.id===plans.current_plan;
+      return `<div class="field" style="background:var(--bg2);border:1px solid var(--border);border-radius:11px;padding:14px">
+        <label style="font-size:15px">${esc(t.label)}${isCurrent?' <span class="pill done" style="font-size:10px">Current</span>':""}</label>
+        <div class="hint" style="margin:2px 0 10px">${t.price_usd?`$${t.price_usd.toFixed(0)}/mo`:"Free"} · ${t.max_concurrent} concurrent · ${t.max_duration_hours?`${t.max_duration_hours}h cap`:"no time cap"}</div>
+        ${(t.id==="free"||isCurrent)?"":`<button class="btn sm primary" onclick="subscribeStreamsPlan('${t.id}')">Upgrade</button>`}
+      </div>`;
+    }).join("");
+  }catch(e){statusEl.textContent="Could not load plan: "+e.message;}
+}
+
+async function subscribeStreamsPlan(tier){
+  try{
+    const d=await api("/streams/subscribe",{method:"POST",body:JSON.stringify({tier})});
+    if(!d.approve_url) throw new Error("PayPal did not return an approval link");
+    const w=window.open(d.approve_url,"mpt_paypal_streams_sub","width=560,height=760");
+    if(!w){toast("Allow popups for this site to subscribe","err");return;}
+    const poll=setInterval(()=>{
+      if(w.closed){
+        clearInterval(poll);
+        toast("Confirming your subscription with PayPal - this can take a few seconds…");
+        setTimeout(()=>{whoami();loadStreamsPlan();},4000);
+      }
+    },800);
   }catch(e){toast(e.message,"err")}
 }
 
@@ -1614,6 +1660,10 @@ async function loadSettings(){
     $("#s-pp-webhook").value=s.paypal_webhook_id||"";
     $("#s-pp-credit-price").value=s.credit_price_usd??0.75;
     $("#s-pp-automode-price").value=s.auto_mode_price_usd??29.0;
+    $("#s-pp-streams-starter-plan").value=s.paypal_streams_starter_plan_id||"";
+    $("#s-pp-streams-starter-price").value=s.streams_starter_price_usd??9.0;
+    $("#s-pp-streams-pro-plan").value=s.paypal_streams_pro_plan_id||"";
+    $("#s-pp-streams-pro-price").value=s.streams_pro_price_usd??29.0;
     const base=(s.publish_base_url||"http://localhost:8080").replace(/\/$/,"");
     $("#s-baseurl").value=base;
     updateRedirects(base);
@@ -1675,6 +1725,10 @@ $("#save-settings").onclick=async()=>{
     paypal_webhook_id:$("#s-pp-webhook").value.trim(),
     credit_price_usd:parseFloat($("#s-pp-credit-price").value)||0.75,
     auto_mode_price_usd:parseFloat($("#s-pp-automode-price").value)||29.0,
+    paypal_streams_starter_plan_id:$("#s-pp-streams-starter-plan").value.trim(),
+    streams_starter_price_usd:parseFloat($("#s-pp-streams-starter-price").value)||9.0,
+    paypal_streams_pro_plan_id:$("#s-pp-streams-pro-plan").value.trim(),
+    streams_pro_price_usd:parseFloat($("#s-pp-streams-pro-price").value)||29.0,
     publish_base_url:$("#s-baseurl").value.trim()||"http://localhost:8080",
     smtp_host:$("#s-smtp-host").value.trim(),
     smtp_port:parseInt($("#s-smtp-port").value,10)||587,
@@ -1876,6 +1930,8 @@ $("#save-profile").onclick=async()=>{
 /* boot */
 refresh();
 loadProfile();
+loadReplayChannels();
+loadStreamsPlan();
 /* Poll slowly, and only while the tab is actually visible. Every /jobs call
    costs one Firestore read per job plus three more, so the old 2s timer on a
    dashboard left open all day burned ~650K reads/day by itself - 13x the free

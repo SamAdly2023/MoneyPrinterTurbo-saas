@@ -361,6 +361,10 @@ def set_auto_mode_subscription(uid: str, active: bool) -> None:
     _update_user(uid, {"auto_mode_subscription_active": active})
 
 
+def set_streams_plan(uid: str, plan: str) -> None:
+    _update_user(uid, {"streams_plan": plan})
+
+
 # ---------------------------------------------------------------------------
 # API keys
 # ---------------------------------------------------------------------------

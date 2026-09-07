@@ -77,6 +77,14 @@ def _settings_response(settings: dict) -> dict:
         "paypal_webhook_id": settings.get("paypal_webhook_id", ""),
         "credit_price_usd": settings.get("credit_price_usd", 0.75),
         "auto_mode_price_usd": settings.get("auto_mode_price_usd", 29.0),
+        # Streams plan tiers (app/services/replay.py's STREAMS_PLANS) - one
+        # PayPal Billing Plan + price per paid tier, same pattern as Auto
+        # Mode above. "free" has no PayPal plan; it's the default with no
+        # subscription at all.
+        "paypal_streams_starter_plan_id": settings.get("paypal_streams_starter_plan_id", ""),
+        "streams_starter_price_usd": settings.get("streams_starter_price_usd", 9.0),
+        "paypal_streams_pro_plan_id": settings.get("paypal_streams_pro_plan_id", ""),
+        "streams_pro_price_usd": settings.get("streams_pro_price_usd", 29.0),
         "publish_base_url": settings.get("publish_base_url", "http://localhost:8080"),
         "replicate_api_token": settings.get("replicate_api_token", ""),
         "avatar_image_path": settings.get("avatar_image_path", ""),
@@ -130,6 +138,10 @@ class SettingsBody(BaseModel):
     paypal_webhook_id: Optional[str] = None
     credit_price_usd: Optional[float] = None
     auto_mode_price_usd: Optional[float] = None
+    paypal_streams_starter_plan_id: Optional[str] = None
+    streams_starter_price_usd: Optional[float] = None
+    paypal_streams_pro_plan_id: Optional[str] = None
+    streams_pro_price_usd: Optional[float] = None
     publish_base_url: Optional[str] = None
     replicate_api_token: Optional[str] = None
     smtp_host: Optional[str] = None

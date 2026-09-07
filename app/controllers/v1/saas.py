@@ -1038,6 +1038,50 @@ def automode_subscribe(request: Request):
     return utils.get_response(200, {"subscription_id": sub.get("id", ""), "approve_url": approve_url})
 
 
+@router.get("/saas/streams/plans", summary="List Streams subscription tiers and the caller's current plan")
+def list_streams_plans(request: Request):
+    uid = _uid(request)
+    tiers = [
+        {
+            "id": tier_id,
+            "label": tier["label"],
+            "max_concurrent": tier["max_concurrent"],
+            "max_duration_hours": tier["max_duration_hours"],
+            "price_usd": billing.streams_plan_price(tier_id) if billing.live_billing_enabled() else 0,
+        }
+        for tier_id, tier in replay.STREAMS_PLANS.items()
+    ]
+    return utils.get_response(200, {
+        "tiers": tiers,
+        "current_plan": replay.get_streams_plan(uid),
+        "paypal_client_id": billing.paypal_client_id() if billing.live_billing_enabled() else "",
+    })
+
+
+class StreamsSubscribeBody(BaseModel):
+    tier: str
+
+
+@router.post("/saas/streams/subscribe", summary="Start a PayPal subscription for a Streams plan tier")
+def streams_subscribe(request: Request, body: StreamsSubscribeBody):
+    if not billing.live_billing_enabled():
+        return utils.get_response(400, message="Subscriptions are only sold on the hosted site.")
+    if body.tier not in replay.STREAMS_PLANS or body.tier == "free":
+        return utils.get_response(400, message=f"unknown plan tier: {body.tier}")
+    uid = _uid(request)
+    try:
+        sub = billing.create_streams_subscription(uid, body.tier)
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"PayPal Streams subscription creation failed for {uid} ({body.tier}): {e}")
+        return utils.get_response(502, message=f"PayPal error: {e}")
+    approve_url = next(
+        (link["href"] for link in sub.get("links", []) if link.get("rel") == "approve"), ""
+    )
+    return utils.get_response(200, {"subscription_id": sub.get("id", ""), "approve_url": approve_url})
+
+
 @router.post("/saas/paypal/webhook", summary="PayPal webhook - authoritative source for subscription state")
 async def paypal_webhook(request: Request):
     """No auth cookie here - this is PayPal's server calling us, not a

@@ -222,6 +222,10 @@ def set_auto_mode_subscription(uid: str, active: bool) -> None:
     db.collection("users").document(uid).update({"auto_mode_subscription_active": active})
 
 
+def set_streams_plan(uid: str, plan: str) -> None:
+    db.collection("users").document(uid).update({"streams_plan": plan})
+
+
 # ---------------------------------------------------------------------------
 # API keys (external platform access - see app/controllers/v1/external.py)
 # ---------------------------------------------------------------------------

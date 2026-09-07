@@ -97,5 +97,6 @@ def get_current_user(request: Request) -> dict | None:
         # Mode paywall prompt when the live-site flag is also true.
         "credits": int(user.get("credits", 0)),
         "auto_mode_subscription_active": bool(user.get("auto_mode_subscription_active")),
+        "streams_plan": user.get("streams_plan") or "free",
         "live_billing_enabled": billing.live_billing_enabled(),
     }
