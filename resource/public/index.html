@@ -187,10 +187,10 @@
       <img class="logo" src="/logo-icon.png" alt="Vidzy" />
       <div><h1>Vidzy</h1><span>AI video studio</span></div>
     </div>
-    <div class="nav-item active" data-view="dashboard"><span class="ic">▦</span> Dashboard</div>
+    <div class="nav-item active" data-view="replay"><span class="ic">📡</span> Streams</div>
+    <div class="nav-item" data-view="dashboard"><span class="ic">▦</span> Dashboard</div>
     <div class="nav-item" data-view="new"><span class="ic">✎</span> New Script</div>
     <div class="nav-item" data-view="clips"><span class="ic">✂️</span> Clips</div>
-    <div class="nav-item" data-view="replay"><span class="ic">📡</span> Streams</div>
     <div class="nav-item" data-view="profile"><span class="ic">🏢</span> Profile</div>
     <div class="nav-item" data-view="api"><span class="ic">🔌</span> API</div>
     <div class="nav-item" id="credits-link" data-view="credits" style="display:none"><span class="ic">💳</span> Buy Credits</div>
@@ -217,7 +217,7 @@
 
   <main class="main">
     <!-- DASHBOARD -->
-    <section class="view active" id="view-dashboard">
+    <section class="view" id="view-dashboard">
       <div class="page-head">
         <div><h2>Dashboard</h2><p>Your saved scripts run automatically, one by one.</p></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -373,7 +373,7 @@
     </section>
 
     <!-- REPLAY CHANNELS -->
-    <section class="view" id="view-replay">
+    <section class="view active" id="view-replay">
       <div class="page-head"><div><h2>Streams</h2><p>Loop one of your videos as a real 24/7 YouTube Live stream.</p></div></div>
       <p class="hint" style="margin:-10px 0 20px">Streams your video to your real YouTube channel, on loop or once. This doesn't guarantee YouTube watch-hour eligibility — that depends on YouTube's own policies, content, and traffic.</p>
 
@@ -384,15 +384,9 @@
           <label>Source video</label>
           <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap">
             <button class="btn sm" id="replay-src-tab-job" type="button">From my videos</button>
-            <button class="btn sm ghost" id="replay-src-tab-upload" type="button">Upload a video</button>
             <button class="btn sm ghost" id="replay-src-tab-url" type="button">Import from URL</button>
           </div>
           <select id="replay-source-job"></select>
-          <div id="replay-source-upload-wrap" style="display:none">
-            <input type="file" id="replay-upload-file" accept="video/mp4,video/quicktime,video/x-matroska,video/webm,.mp4,.mov,.mkv,.webm,.m4v" />
-            <button class="btn sm" id="replay-upload-btn" type="button" style="margin-left:8px">Upload</button>
-            <p class="hint" id="replay-upload-status"></p>
-          </div>
           <div id="replay-source-url-wrap" style="display:none">
             <input type="url" id="replay-url-input" placeholder="A direct video link, or a YouTube/video-site page URL" style="width:100%" />
             <button class="btn sm" id="replay-url-import-btn" type="button" style="margin-top:8px">Import</button>
@@ -1154,15 +1148,14 @@ let studioPollTimer=null;
 let replaySourceTab="job";
 function setReplaySourceTab(tab){
   replaySourceTab=tab;
-  const tabs={job:"replay-src-tab-job",upload:"replay-src-tab-upload",url:"replay-src-tab-url"};
-  const wraps={job:"replay-source-job",upload:"replay-source-upload-wrap",url:"replay-source-url-wrap"};
+  const tabs={job:"replay-src-tab-job",url:"replay-src-tab-url"};
+  const wraps={job:"replay-source-job",url:"replay-source-url-wrap"};
   for(const t in tabs){
     $("#"+tabs[t]).classList.toggle("ghost",t!==tab);
     $("#"+wraps[t]).style.display=(t===tab)?(t==="job"?"":"block"):"none";
   }
 }
 $("#replay-src-tab-job").onclick=()=>setReplaySourceTab("job");
-$("#replay-src-tab-upload").onclick=()=>setReplaySourceTab("upload");
 $("#replay-src-tab-url").onclick=()=>setReplaySourceTab("url");
 
 async function loadReplayChannels(){
@@ -1171,7 +1164,7 @@ async function loadReplayChannels(){
     replaySourcesCache=sd.sources||[];
     $("#replay-source-job").innerHTML=replaySourcesCache.length
       ? replaySourcesCache.map(s=>`<option value="${esc(s.job_id)}">${esc(s.title)} (${fmtDate(s.created_at)})</option>`).join("")
-      : `<option value="">No finished videos yet - render one first, or upload instead</option>`;
+      : `<option value="">No finished videos yet - render one first, or import from a URL instead</option>`;
   }catch(e){/* ignore */}
   try{
     const cd=await api("/replay/channels");
@@ -1201,23 +1194,6 @@ function renderReplayChannels(channels){
   }).join("");
 }
 
-$("#replay-upload-btn").onclick=async()=>{
-  const fileInput=$("#replay-upload-file");
-  if(!fileInput.files.length){toast("Choose a video file first","err");return;}
-  const btn=$("#replay-upload-btn");btn.disabled=true;btn.textContent="Uploading…";
-  $("#replay-upload-status").textContent="";
-  try{
-    const fd=new FormData();fd.append("file",fileInput.files[0]);
-    const r=await fetch(API+"/replay/upload",{method:"POST",body:fd});
-    const j=await r.json();
-    if(!r.ok||(j.status&&j.status>=400))throw new Error(j.message||"upload failed");
-    replayUploadedSource=j.data;
-    $("#replay-upload-status").textContent=`Ready - ${Math.round(replayUploadedSource.duration_seconds)}s`;
-    toast("Video uploaded");
-  }catch(e){toast(e.message,"err")}
-  finally{btn.disabled=false;btn.textContent="Upload";}
-};
-
 $("#replay-url-import-btn").onclick=async()=>{
   const url=$("#replay-url-input").value.trim();
   if(!url){toast("Paste a video URL first","err");return;}
@@ -1235,8 +1211,8 @@ $("#replay-url-import-btn").onclick=async()=>{
 $("#replay-create-btn").onclick=async()=>{
   const name=$("#replay-name").value.trim();
   let source_kind,source_ref;
-  if(replaySourceTab==="upload"||replaySourceTab==="url"){
-    if(!replayUploadedSource){toast(replaySourceTab==="url"?"Import a video first":"Upload a video first","err");return;}
+  if(replaySourceTab==="url"){
+    if(!replayUploadedSource){toast("Import a video first","err");return;}
     source_kind="upload";source_ref=replayUploadedSource.video_url;
   }else{
     source_kind="job";source_ref=$("#replay-source-job").value;
@@ -1254,7 +1230,6 @@ $("#replay-create-btn").onclick=async()=>{
     toast("Stream created");
     $("#replay-name").value="";
     replayUploadedSource=null;
-    $("#replay-upload-status").textContent="";
     $("#replay-url-input").value="";
     $("#replay-url-status").textContent="";
     loadReplayChannels();

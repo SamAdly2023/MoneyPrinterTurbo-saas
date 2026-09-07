@@ -32,7 +32,6 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 import requests
-from fastapi import UploadFile
 from loguru import logger
 from moviepy import VideoFileClip
 
@@ -117,43 +116,6 @@ def _is_readable_video(video_path: str) -> bool:
                 clip.close()
             except Exception:  # noqa: BLE001
                 pass
-
-
-def save_replay_upload(uid: str, file: UploadFile) -> dict:
-    """Secondary path: upload a fresh video, independent of any job. Same
-    chunked-write-with-cap idiom as saas.py's upload_clip_source, but (like
-    upload_avatar_photo) writes into saas.output_dir() so it's immediately
-    servable at /media/<filename> with zero extra routing."""
-    ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in ALLOWED_UPLOAD_EXTS:
-        raise ValueError(f"unsupported file type: {ext or 'unknown'}")
-
-    filename = f"{_UPLOAD_PREFIX}{utils.get_uuid()}{ext}"
-    dest_path = os.path.join(saas.output_dir(), filename)
-    size = 0
-    logger.info(f"replay upload starting for {uid}: {file.filename}")
-    try:
-        with open(dest_path, "wb") as out:
-            while True:
-                chunk = file.file.read(1024 * 1024)
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > MAX_UPLOAD_BYTES:
-                    raise ValueError("file too large (max 500MB)")
-                out.write(chunk)
-        if size == 0:
-            raise ValueError("uploaded file is empty")
-        if not _is_readable_video(dest_path):
-            raise ValueError("that video file appears to be corrupted or incomplete - try uploading it again")
-        duration = clips.probe_duration(dest_path)
-    except Exception:
-        if os.path.isfile(dest_path):
-            os.remove(dest_path)
-        raise
-
-    logger.info(f"replay upload finished for {uid}: {filename} ({size} bytes, {duration:.1f}s)")
-    return {"video_url": f"/media/{filename}", "duration_seconds": duration}
 
 
 def _validate_public_url(url: str) -> None:

@@ -1069,24 +1069,6 @@ def replay_sources(request: Request):
     return utils.get_response(200, {"sources": replay.list_sources(uid)})
 
 
-@router.post("/saas/replay/upload", summary="Upload a fresh video to use as a replay-channel source")
-def replay_upload(request: Request, file: UploadFile = File(...)):
-    uid = _uid(request)
-    try:
-        result = replay.save_replay_upload(uid, file)
-    except ValueError as e:
-        return utils.get_response(400, message=str(e))
-    except Exception as e:  # noqa: BLE001
-        # A large/slow upload is exactly the kind of request most likely to
-        # hit a client disconnect or read error mid-transfer - without this,
-        # anything other than our own ValueErrors escaped uncaught and (per
-        # a live report) came back to the browser as an HTML error page
-        # instead of JSON, breaking the frontend's error handling entirely.
-        logger.error(f"replay upload failed for {uid} ({file.filename}): {e}")
-        return utils.get_response(500, message="upload failed - please try again")
-    return utils.get_response(200, result)
-
-
 class ReplayUrlImportBody(BaseModel):
     url: str
 
