@@ -881,6 +881,66 @@ def bilibili_save_cookies(uid: str, cookie_blob: str) -> dict:
     return info
 
 
+# --------------------------------------------------------------------------- #
+# Rumble
+#
+# Rumble's upload API (rumble.com/api/simple-upload.php) is real but has no
+# public self-serve OAuth: each creator has to email bd@rumble.com to get a
+# personal access token, then paste it here - same "no OAuth available"
+# shape as Bilibili above, just a token instead of cookies.
+# --------------------------------------------------------------------------- #
+RUMBLE_UPLOAD_URL = "https://rumble.com/api/simple-upload.php"
+
+
+def rumble_status(uid: str) -> dict:
+    info = firestore_db.get_user_social(uid).get("rumble", {})
+    return {"connected": bool(info.get("access_token"))}
+
+
+def rumble_save_token(uid: str, access_token: str, channel_id: str = "") -> dict:
+    access_token = (access_token or "").strip()
+    if not access_token:
+        raise ValueError("paste the access token Rumble emailed you")
+    info = {"access_token": access_token, "channel_id": (channel_id or "").strip(), "saved_at": time.time()}
+    firestore_db.save_user_social(uid, "rumble", info)
+    logger.success("Rumble token saved for " + uid)
+    return info
+
+
+def rumble_upload(uid: str, video_path: str, title: str, description: str, tags: list) -> dict:
+    info = firestore_db.get_user_social(uid).get("rumble", {})
+    access_token = info.get("access_token", "")
+    if not access_token:
+        raise ValueError("Rumble is not connected - paste your access token in the dashboard")
+
+    data = {
+        "access_token": access_token,
+        "title": (title or "Video")[:150],
+        "description": (description or "")[:5000],
+        # 1 = "Rumble" default license; Rumble's own docs list this as the
+        # standard non-exclusive option, matching what a first upload gets
+        # if you use their own web uploader without changing anything.
+        "license_type": "1",
+    }
+    if info.get("channel_id"):
+        data["channel_id"] = info["channel_id"]
+    if tags:
+        data["tags"] = ",".join(t for t in tags if t)[:250]
+
+    with open(video_path, "rb") as f:
+        resp = requests.post(
+            RUMBLE_UPLOAD_URL, data=data,
+            files={"video": (os.path.basename(video_path), f, "video/mp4")},
+            timeout=600,
+        )
+    if not resp.ok:
+        raise RuntimeError(f"Rumble upload failed ({resp.status_code}): {resp.text[:300]}")
+    result = resp.json()
+    if not result.get("success"):
+        raise RuntimeError(f"Rumble rejected the upload: {result}")
+    return {"success": True, "video_id": result.get("video_id"), "url": result.get("url_monetized", "")}
+
+
 def bilibili_upload(uid: str, video_path: str, title: str, description: str, tags: list) -> dict:
     if not bilibili_available():
         raise RuntimeError(
@@ -949,6 +1009,7 @@ def status(uid: str) -> dict:
         "facebook": facebook_status(uid),
         "linkedin": linkedin_status(uid),
         "bilibili": bilibili_status(uid),
+        "rumble": rumble_status(uid),
     }
 
 
@@ -1009,4 +1070,10 @@ def publish_video(uid: str, video_path: str, meta: dict, platforms: list) -> dic
         except Exception as e:  # noqa: BLE001
             logger.error(f"instagram publish failed: {e}")
             results["instagram"] = {"success": False, "error": str(e)}
+    if "rumble" in platforms:
+        try:
+            results["rumble"] = rumble_upload(uid, video_path, title, description, tags)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"rumble publish failed: {e}")
+            results["rumble"] = {"success": False, "error": str(e)}
     return results

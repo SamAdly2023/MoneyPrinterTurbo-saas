@@ -709,9 +709,24 @@ def bilibili_credentials(request: Request, body: BilibiliCookiesBody):
     return utils.get_response(200, publish.status(uid))
 
 
+class RumbleTokenBody(BaseModel):
+    access_token: str
+    channel_id: Optional[str] = None
+
+
+@router.post("/saas/rumble/credentials", summary="Save a Rumble access token (no public OAuth - see publish.py)")
+def rumble_credentials(request: Request, body: RumbleTokenBody):
+    uid = _uid(request)
+    try:
+        publish.rumble_save_token(uid, body.access_token, body.channel_id or "")
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    return utils.get_response(200, publish.status(uid))
+
+
 @router.post("/saas/{platform}/disconnect", summary="Disconnect a platform")
 def social_disconnect(request: Request, platform: str = Path(...)):
-    if platform not in ("youtube", "tiktok", "facebook", "linkedin", "bilibili"):
+    if platform not in ("youtube", "tiktok", "facebook", "linkedin", "bilibili", "rumble"):
         return utils.get_response(400, message="unknown platform")
     uid = _uid(request)
     publish.disconnect(uid, platform)
