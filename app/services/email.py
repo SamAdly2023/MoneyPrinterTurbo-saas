@@ -1,5 +1,7 @@
 """
-Transactional email (welcome email to new users, admin new-signup alerts).
+Transactional email: welcome email to new users, purchase/subscription
+receipts to the buyer, and admin alerts for both new signups and every
+paid purchase (credits, Auto Mode, Streams plans).
 
 SMTP credentials are admin-managed and shared (app_config/global in Firestore),
 the same pattern as the YouTube/TikTok OAuth app credentials in publish.py -
@@ -171,6 +173,53 @@ def send_welcome_email(to_email: str) -> bool:
       </p>
     """
     return send_email(to_email, "Welcome to Vidzy - here's how to get started", _email_shell(inner))
+
+
+def send_purchase_confirmation(to_email: str, description: str, amount_usd: float) -> bool:
+    inner = f"""
+      <h1 style="margin:0 0 6px;font-size:22px;color:#fff;">You're all set 🎉</h1>
+      <p style="margin:0 0 22px;color:{BRAND_MUTED};font-size:14px;">
+        Thanks for your purchase - here's the receipt.
+      </p>
+      <table role="presentation" style="width:100%;border-collapse:collapse;background:{BRAND_BG};border-radius:12px;">
+        <tr>
+          <td style="padding:14px 16px;font-size:14px;color:{BRAND_TEXT};">{description}</td>
+          <td style="padding:14px 16px;font-size:14px;color:#fff;font-weight:700;text-align:right;">${amount_usd:.2f}</td>
+        </tr>
+      </table>
+      <div style="text-align:center;margin-top:26px;">
+        <a href="{_base_url()}" style="display:inline-block;background:linear-gradient(135deg,#6c5ce7,#a06bff);
+           color:#fff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 26px;border-radius:11px;">
+          Open Vidzy
+        </a>
+      </div>
+      <p style="margin:28px 0 0;color:{BRAND_MUTED};font-size:13px;">
+        Questions about your purchase? Just reply to this email.<br/><br/>
+        - The Vidzy Team
+      </p>
+    """
+    return send_email(to_email, f"Vidzy receipt - {description}", _email_shell(inner))
+
+
+def notify_admin_new_purchase(user_email: str, description: str, amount_usd: float) -> bool:
+    admin_email = _admin_notify_email()
+    if not admin_email:
+        return False
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    inner = f"""
+      <h1 style="margin:0 0 14px;font-size:19px;color:#fff;">💰 New Vidzy purchase</h1>
+      <p style="margin:0;font-size:14px;color:{BRAND_TEXT};">
+        <strong>{user_email}</strong> just paid <strong>${amount_usd:.2f}</strong> for <strong>{description}</strong>.
+      </p>
+      <p style="margin:14px 0 0;font-size:12.5px;color:{BRAND_MUTED};">{now}</p>
+      <div style="margin-top:22px;">
+        <a href="{_base_url()}/admin" style="display:inline-block;background:{BRAND_PURPLE};
+           color:#fff;text-decoration:none;font-weight:700;font-size:13px;padding:10px 20px;border-radius:10px;">
+          View in Admin Dashboard
+        </a>
+      </div>
+    """
+    return send_email(admin_email, f"New Vidzy purchase: {description} (${amount_usd:.2f})", _email_shell(inner))
 
 
 def notify_admin_new_signup(user_email: str, provider: str) -> bool:

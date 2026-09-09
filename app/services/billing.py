@@ -169,9 +169,29 @@ def capture_order(uid: str, order_id: str) -> dict:
     applied = firestore_db.record_payment_if_new(order_id, uid, credits)
     if applied:
         logger.success(f"credited {uid} with {credits} credits (order {order_id})")
+        _notify_purchase(uid, PACKAGES[package_id]["label"], package_price(package_id))
     else:
         logger.info(f"order {order_id} already processed - no-op")
     return {"applied": applied, "credits": credits, "balance": firestore_db.get_user_credits(uid)}
+
+
+def _notify_purchase(uid: str, description: str, amount_usd: float) -> None:
+    """Fires the buyer's receipt + the admin alert in a background thread -
+    a slow/broken mail server must never delay a purchase response or a
+    PayPal webhook ack. Imports email locally: billing is imported by
+    auth.py, and email.py imports auth.py for ADMIN_EMAILS, so importing
+    email at billing's module level would be a circular import."""
+    import threading
+
+    from app.services import email
+
+    def _send():
+        user_email = (firestore_db.get_user(uid) or {}).get("email", "")
+        if user_email:
+            email.send_purchase_confirmation(user_email, description, amount_usd)
+        email.notify_admin_new_purchase(user_email or uid, description, amount_usd)
+
+    threading.Thread(target=_send, daemon=True).start()
 
 
 # --------------------------------------------------------------------------- #
@@ -291,9 +311,11 @@ def handle_webhook_event(event: dict) -> None:
         if is_streams:
             firestore_db.set_streams_plan(uid, tier)
             logger.success(f"Streams '{tier}' plan activated for {uid}")
+            _notify_purchase(uid, f"Streams {tier.capitalize()} plan subscription", streams_plan_price(tier))
         else:
             firestore_db.set_auto_mode_subscription(uid, True)
             logger.success(f"Auto Mode subscription activated for {uid}")
+            _notify_purchase(uid, "Auto Mode subscription", auto_mode_price())
     elif event_type in ("BILLING.SUBSCRIPTION.CANCELLED", "BILLING.SUBSCRIPTION.SUSPENDED", "BILLING.SUBSCRIPTION.EXPIRED"):
         if is_streams:
             firestore_db.set_streams_plan(uid, "free")
