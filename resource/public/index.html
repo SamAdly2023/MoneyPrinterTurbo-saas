@@ -410,7 +410,12 @@
         <div class="field"><label>Layout</label>
           <select id="replay-layout"><option value="spotlight">Spotlight</option><option value="speaker">Speaker</option><option value="grid">Grid</option></select></div>
         <div class="field">
-          <p class="hint">Streams to your real YouTube channel. Needs a channel eligible for live streaming (phone-verified, no recent restrictions) and YouTube reconnected for live access. No pause — Stop ends the broadcast.</p>
+          <label>Destination</label>
+          <div style="display:flex;gap:10px;margin-bottom:6px">
+            <button class="btn sm" id="replay-dest-youtube" type="button">▶ YouTube</button>
+            <button class="btn sm ghost" id="replay-dest-rumble" type="button">📡 Rumble</button>
+          </div>
+          <p class="hint" id="replay-dest-hint">Streams to your real YouTube channel. Needs a channel eligible for live streaming (phone-verified, no recent restrictions) and YouTube reconnected for live access. No pause — Stop ends the broadcast.</p>
         </div>
         <div class="form-actions"><button class="btn primary" id="replay-create-btn">Create stream</button></div>
       </div>
@@ -1158,6 +1163,32 @@ let replaySourcesCache=[];
 let replayUploadedSource=null; // {video_url, duration_seconds} once uploaded
 const replayCreateIsReal=true; // every channel is a real YouTube Live broadcast now - no simulated-demo option
 let studioPollTimer=null;
+let replayCreateDestination="youtube";
+const REPLAY_DEST_HINTS={
+  youtube:"Streams to your real YouTube channel. Needs a channel eligible for live streaming (phone-verified, no recent restrictions) and YouTube reconnected for live access. No pause — Stop ends the broadcast.",
+  rumble:"Streams to your Rumble channel using the stream URL/key from your Rumble account settings. No pause — Stop ends the broadcast.",
+};
+function setReplayDestination(dest){
+  replayCreateDestination=dest;
+  $("#replay-dest-youtube").classList.toggle("ghost",dest!=="youtube");
+  $("#replay-dest-rumble").classList.toggle("ghost",dest!=="rumble");
+  $("#replay-dest-hint").textContent=REPLAY_DEST_HINTS[dest];
+}
+$("#replay-dest-youtube").onclick=()=>setReplayDestination("youtube");
+$("#replay-dest-rumble").onclick=async()=>{
+  setReplayDestination("rumble");
+  if(!(social.rumble_live&&social.rumble_live.connected)){
+    const url=prompt("Rumble stream URL (from rumble.com/account/livestream-api):");
+    if(!url){setReplayDestination("youtube");return;}
+    const key=prompt("Rumble stream key:");
+    if(!key){setReplayDestination("youtube");return;}
+    try{
+      await api("/rumble/live-credentials",{method:"POST",body:JSON.stringify({stream_url:url,stream_key:key})});
+      await refreshSocial();
+      toast("Rumble connected for live streaming");
+    }catch(e){toast(e.message,"err");setReplayDestination("youtube");}
+  }
+};
 
 let replaySourceTab="job";
 function setReplaySourceTab(tab){
@@ -1230,12 +1261,13 @@ function renderReplayChannels(channels){
     return `<div class="job">
       <div class="top">
         <div>
-          <p class="title">${esc(c.name)} <span class="pill off" style="font-size:11px">${c.is_real?"🔴 Real":"🎬 Demo"}</span></p>
+          <p class="title">${esc(c.name)} <span class="pill off" style="font-size:11px">${c.is_real?"🔴 Real":"🎬 Demo"}</span> <span class="pill off" style="font-size:11px">${c.destination==="rumble"?"📡 Rumble":"▶ YouTube"}</span></p>
           <div class="meta">${esc(c.output_format)} · ${esc(c.layout)} · ${c.replay_mode==="loop"?"loop":"play once"}</div>
         </div>
         <span class="pill ${m.cls}">${m.label}</span>
       </div>
       ${c.is_real&&c.youtube_watch_url&&c.status==="live"?`<p class="hint"><a href="${esc(c.youtube_watch_url)}" target="_blank" rel="noopener">▶ Watch live on YouTube</a></p>`:""}
+      ${c.is_real&&c.destination==="rumble"&&c.status==="live"?`<p class="hint">🔴 Live on Rumble</p>`:""}
       <div class="actions">
         <button class="btn sm" onclick="openReplayStudio('${c.id}')">🎬 Open Studio</button>
         <button class="btn sm danger" onclick="deleteReplayChannel('${c.id}')">🗑 Delete</button>
@@ -1276,6 +1308,7 @@ $("#replay-create-btn").onclick=async()=>{
       output_format:$("#replay-format").value,
       layout:$("#replay-layout").value,
       is_real:replayCreateIsReal,
+      destination:replayCreateDestination,
     })});
     toast("Stream created");
     $("#replay-name").value="";
@@ -1329,8 +1362,8 @@ async function refreshStudio(){
   $("#studio-status-pill").className="pill "+m.cls;
   $("#studio-status-pill").textContent=m.label;
   $("#studio-subhead").textContent=c.is_real
-    ? "Real YouTube Live broadcast — sent to your connected channel. No pause; Stop ends it."
-    : "Demo broadcast — simulated 24/7 loop playback, not a real YouTube Live stream.";
+    ? `Real ${c.destination==="rumble"?"Rumble":"YouTube"} Live broadcast — sent to your connected channel. No pause; Stop ends it.`
+    : "Demo broadcast — simulated 24/7 loop playback, not a real live stream.";
 
   const player=$("#studio-player");
   if(player.dataset.src!==c.source_video_url){
@@ -1359,14 +1392,21 @@ async function refreshStudio(){
   $("#studio-layout").value=c.layout;$("#studio-layout").disabled=live;
 
   const yt=social.youtube||{connected:false};
-  $("#studio-connect-yt-btn").style.display=yt.connected?"none":"";
-  $("#studio-destination").textContent=yt.connected
-    ? `Connected — ${yt.channel||"your YouTube channel"}`
-    : "Not connected. Connect YouTube to enable Go Live.";
-  $("#studio-reconnect-hint").style.display=(c.is_real&&yt.connected&&yt.needs_reconnect_for_live)?"":"none";
-  $("#studio-golive-hint").textContent=!yt.connected
-    ? "Connect YouTube before going live."
-    : (c.is_real&&yt.needs_reconnect_for_live)
+  const rumbleLive=social.rumble_live||{connected:false};
+  const isRumbleDest=c.destination==="rumble";
+  $("#studio-connect-yt-btn").style.display=(!isRumbleDest&&!yt.connected)?"":"none";
+  if(isRumbleDest){
+    $("#studio-destination").textContent=rumbleLive.connected?"Connected — Rumble":"Not connected. Paste your Rumble stream URL/key in Streams to enable Go Live.";
+  }else{
+    $("#studio-destination").textContent=yt.connected
+      ? `Connected — ${yt.channel||"your YouTube channel"}`
+      : "Not connected. Connect YouTube to enable Go Live.";
+  }
+  $("#studio-reconnect-hint").style.display=(!isRumbleDest&&c.is_real&&yt.connected&&yt.needs_reconnect_for_live)?"":"none";
+  const connected=isRumbleDest?rumbleLive.connected:yt.connected;
+  $("#studio-golive-hint").textContent=!connected
+    ? `Connect ${isRumbleDest?"Rumble":"YouTube"} before going live.`
+    : (!isRumbleDest&&c.is_real&&yt.needs_reconnect_for_live)
       ? "Reconnect YouTube (above) before going live."
       : "";
 

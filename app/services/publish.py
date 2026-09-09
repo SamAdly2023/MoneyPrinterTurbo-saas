@@ -897,6 +897,29 @@ def rumble_status(uid: str) -> dict:
     return {"connected": bool(info.get("access_token"))}
 
 
+def rumble_live_status(uid: str) -> dict:
+    info = firestore_db.get_user_social(uid).get("rumble", {})
+    return {"connected": bool(info.get("stream_url") and info.get("stream_key"))}
+
+
+def rumble_save_live_credentials(uid: str, stream_url: str, stream_key: str) -> dict:
+    """Unlike the upload API, Rumble live streaming needs no business-team
+    request - the user gets a static, self-serve RTMP server URL + stream
+    key from rumble.com/account/livestream-api and pastes both here, the
+    same "no OAuth" shape as the upload token but genuinely self-serve.
+    Stored on the same "rumble" social entry as the upload token (merged,
+    not replaced - see save_user_social) since they're independent
+    capabilities a user might connect one, both, or neither of."""
+    stream_url = (stream_url or "").strip()
+    stream_key = (stream_key or "").strip()
+    if not stream_url or not stream_key:
+        raise ValueError("paste both the stream URL and stream key from your Rumble account")
+    info = {"stream_url": stream_url, "stream_key": stream_key, "live_saved_at": time.time()}
+    firestore_db.save_user_social(uid, "rumble", info)
+    logger.success("Rumble live-stream credentials saved for " + uid)
+    return info
+
+
 def rumble_save_token(uid: str, access_token: str, channel_id: str = "") -> dict:
     access_token = (access_token or "").strip()
     if not access_token:
@@ -1010,6 +1033,7 @@ def status(uid: str) -> dict:
         "linkedin": linkedin_status(uid),
         "bilibili": bilibili_status(uid),
         "rumble": rumble_status(uid),
+        "rumble_live": rumble_live_status(uid),
     }
 
 

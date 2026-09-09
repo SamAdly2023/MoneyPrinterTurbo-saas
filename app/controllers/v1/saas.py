@@ -724,6 +724,21 @@ def rumble_credentials(request: Request, body: RumbleTokenBody):
     return utils.get_response(200, publish.status(uid))
 
 
+class RumbleLiveCredentialsBody(BaseModel):
+    stream_url: str
+    stream_key: str
+
+
+@router.post("/saas/rumble/live-credentials", summary="Save Rumble live-stream RTMP URL + key (self-serve, no waiting on Rumble)")
+def rumble_live_credentials(request: Request, body: RumbleLiveCredentialsBody):
+    uid = _uid(request)
+    try:
+        publish.rumble_save_live_credentials(uid, body.stream_url, body.stream_key)
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    return utils.get_response(200, publish.status(uid))
+
+
 @router.post("/saas/{platform}/disconnect", summary="Disconnect a platform")
 def social_disconnect(request: Request, platform: str = Path(...)):
     if platform not in ("youtube", "tiktok", "facebook", "linkedin", "bilibili", "rumble"):
@@ -1155,7 +1170,8 @@ class ReplayChannelBody(BaseModel):
     replay_mode: Optional[str] = "loop"
     output_format: Optional[str] = "9:16"
     layout: Optional[str] = "spotlight"
-    is_real: Optional[bool] = False  # True = a real YouTube Live broadcast, not a simulated demo
+    is_real: Optional[bool] = False  # True = a real live broadcast, not a simulated demo
+    destination: Optional[str] = "youtube"  # "youtube" | "rumble"
 
 
 @router.post("/saas/replay/channels", summary="Create a replay channel")
@@ -1165,7 +1181,7 @@ def replay_create_channel(request: Request, body: ReplayChannelBody):
         channel = replay.create_channel(
             uid, body.name, body.source_kind, body.source_ref,
             replay_mode=body.replay_mode, output_format=body.output_format, layout=body.layout,
-            is_real=bool(body.is_real),
+            is_real=bool(body.is_real), destination=body.destination or "youtube",
         )
     except ValueError as e:
         return utils.get_response(400, message=str(e))

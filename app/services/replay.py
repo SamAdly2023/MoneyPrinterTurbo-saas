@@ -46,6 +46,10 @@ STATUS_ENDED = "ended"
 REPLAY_MODES = {"loop", "once"}
 OUTPUT_FORMATS = {"9:16", "16:9", "1:1"}
 LAYOUTS = {"spotlight", "speaker", "grid"}
+# Rumble has no broadcast-creation API, no viewer-stats API, and no custom
+# thumbnail API the way YouTube does - see go_live()'s destination branch
+# and get_channel_stats() below for exactly what that does and doesn't skip.
+DESTINATIONS = {"youtube", "rumble"}
 
 # --------------------------------------------------------------------------- #
 # Streams plans - a real (not simulated) free tier plus paid tiers priced per
@@ -334,6 +338,7 @@ def create_channel(
     output_format: str = "9:16",
     layout: str = "spotlight",
     is_real: bool = False,
+    destination: str = "youtube",
 ) -> dict:
     name = (name or "").strip()
     if source_kind not in ("job", "upload"):
@@ -341,12 +346,15 @@ def create_channel(
     replay_mode = replay_mode or "loop"
     output_format = output_format or "9:16"
     layout = layout or "spotlight"
+    destination = destination or "youtube"
     if replay_mode not in REPLAY_MODES:
         raise ValueError(f"unknown replay_mode: {replay_mode}")
     if output_format not in OUTPUT_FORMATS:
         raise ValueError(f"unknown output_format: {output_format}")
     if layout not in LAYOUTS:
         raise ValueError(f"unknown layout: {layout}")
+    if destination not in DESTINATIONS:
+        raise ValueError(f"unknown destination: {destination}")
 
     source_job_id = None
     youtube_metadata = None
@@ -422,6 +430,7 @@ def create_channel(
         "created_at": now,
         "updated_at": now,
         "is_real": bool(is_real),
+        "destination": destination,
         # AI-generated title/description/tags carried over from the source
         # job, if any (see above) - used as the real broadcast's snippet in
         # go_live() instead of just the channel name. None for uploaded/
@@ -528,9 +537,12 @@ def go_live(uid: str, channel_id: str, force: bool = False) -> dict:
     if not os.path.isfile(path):
         raise ValueError("source video is missing - it may have been deleted")
 
+    destination = channel.get("destination") or "youtube"
     youtube = publish.status(uid).get("youtube", {})
-    if not youtube.get("connected"):
+    if destination == "youtube" and not youtube.get("connected"):
         raise ValueError("connect YouTube before going live")
+    if destination == "rumble" and not publish.rumble_live_status(uid).get("connected"):
+        raise ValueError("connect Rumble for live streaming before going live (paste your stream URL and key in the dashboard)")
 
     if channel.get("is_real") and not force:
         # force=True is the watchdog restarting a channel that's already
@@ -547,7 +559,7 @@ def go_live(uid: str, channel_id: str, force: bool = False) -> dict:
                 f"stream(s) - stop another stream or upgrade your plan to go live with this one."
             )
 
-    if channel.get("is_real"):
+    if channel.get("is_real") and destination == "youtube":
         if publish.youtube_needs_reconnect(uid):
             raise ValueError(
                 "Your YouTube connection needs to be renewed for live streaming - "
@@ -588,6 +600,24 @@ def go_live(uid: str, channel_id: str, force: bool = False) -> dict:
             live_stream.set_thumbnail(uid, result["broadcast_id"], thumbnail)
         except Exception:  # noqa: BLE001
             pass
+    elif channel.get("is_real") and destination == "rumble":
+        # Rumble has no broadcast-creation API and no viewer-stats/thumbnail
+        # API - "going live" is just pushing to the account's static,
+        # self-serve stream URL+key (rumble.com/account/livestream-api).
+        info = firestore_db.get_user_social(uid).get("rumble", {})
+        rtmp_target = f"{(info.get('stream_url') or '').rstrip('/')}/{info.get('stream_key', '')}"
+        try:
+            pid = live_stream.start_push_with_fallback(
+                channel["id"], path, rtmp_target, rtmp_target,
+                is_job_source=(channel["source_kind"] == "job"),
+                loop=(channel["replay_mode"] == "loop"),
+            )
+        except RuntimeError as e:
+            raise ValueError(f"Couldn't start the live stream to Rumble: {e}.")
+        channel["ffmpeg_pid"] = pid
+        channel["auto_restart"] = True
+        if force:
+            channel["restart_count"] = int(channel.get("restart_count") or 0) + 1
 
     now = _now_iso()
     channel["status"] = STATUS_LIVE
@@ -601,8 +631,8 @@ def go_live(uid: str, channel_id: str, force: bool = False) -> dict:
             "accumulated_paused_seconds": 0.0,
             "ended_at": None,
             "ended_reason": None,
-            "destination_platform": "youtube",
-            "destination_label": youtube.get("channel") or "",
+            "destination_platform": destination,
+            "destination_label": youtube.get("channel") or "" if destination == "youtube" else "Rumble",
         }
         # Snapshotted at go-live time (not looked up fresh in _recompute)
         # so an upgrade/downgrade mid-broadcast doesn't retroactively change
