@@ -45,16 +45,11 @@ def create_session(body: SessionBody):
 
     uid, user_email, provider = decoded["uid"], decoded["email"], decoded["provider"]
 
-    # Signup is invitation-only. Check *before* creating anything, so a
-    # rejected sign-up leaves no half-made account behind - and so returning
-    # users, who already have a record, never need an invite again.
-    if firestore_db.get_user(uid) is None:
-        if not firestore_db.claim_invite(body.invite or "", user_email, uid):
-            logger.warning(f"blocked uninvited signup: {user_email}")
-            return utils.get_response(
-                403,
-                message="Access is by invitation only. Request access and we will send you a personal sign-up link.",
-            )
+    # Signup is open to anyone - previously invitation-only (see git history
+    # if that ever needs to come back). An old invite link (?invite=...)
+    # still works via claim_invite below, it's just no longer required.
+    if firestore_db.get_user(uid) is None and body.invite:
+        firestore_db.claim_invite(body.invite, user_email, uid)
 
     user, is_new = firestore_db.create_user_if_missing(uid, user_email, provider)
     if user.get("is_disabled"):
