@@ -27,6 +27,13 @@ def log(msg: str) -> None:
     print(f"{time.strftime('%H:%M:%S')}  {msg}", flush=True)
 
 
+def _version_tuple(v: str) -> tuple:
+    try:
+        return tuple(int(x) for x in str(v).split("."))
+    except ValueError:
+        return (0,)
+
+
 class Engine:
     def __init__(self, client, renderer_factory, sleep=time.sleep, log_fn=log):
         self.client = client
@@ -90,6 +97,10 @@ class Engine:
             try:
                 hb = self.client.heartbeat()
                 backoff = 10
+                if _version_tuple(__version__) < _version_tuple(hb.get("min_engine_version", "0")):
+                    self.log(f"This Engine ({__version__}) is too old for the server. "
+                             "Download the latest from the Vidzy dashboard (API tab).")
+                    return 3
                 if announced != hb.get("email"):
                     announced = hb.get("email")
                     self.log(f"Connected as {announced}. Waiting for videos to render...")
@@ -133,6 +144,11 @@ def main(argv=None) -> int:
         pass
     server = args.server or cfg.get("server") or DEFAULT_SERVER
     key = args.key or cfg.get("key") or os.environ.get("VIDZY_ENGINE_KEY", "")
+    if not key and sys.stdin and sys.stdin.isatty():
+        # First run of the downloaded exe: ask for the key instead of exiting.
+        log("Welcome to the Vidzy Engine.")
+        log("Get your Engine key in the Vidzy dashboard: API tab -> Vidzy Engine -> Generate Engine key.")
+        key = input("Paste your Engine key here and press Enter: ").strip()
     if not key:
         log("No Engine key yet. Get one in the Vidzy dashboard (API tab -> Vidzy Engine), then run:")
         log("    vidzy-engine --key vde_xxxxxxxx")
@@ -144,7 +160,33 @@ def main(argv=None) -> int:
 
     setup_environment(args.data_dir)
     log(f"Vidzy Engine {__version__} - {server}")
-    return Engine(EngineClient(server, key), Renderer).run()
+    code = Engine(EngineClient(server, key), Renderer).run()
+    if code == 2:
+        # Rejected key: forget it so the next launch asks for a fresh one
+        # instead of failing the same way forever.
+        try:
+            os.remove(cfg_path)
+        except OSError:
+            pass
+    return code
+
+
+def run_and_pause(argv=None) -> int:
+    """Entry for the packaged exe: a double-clicked console window closes the
+    instant the program exits, which would hide any error message."""
+    code = 1
+    try:
+        code = main(argv)
+    except KeyboardInterrupt:
+        code = 0
+    except Exception as e:  # noqa: BLE001
+        log(f"Unexpected error: {e}")
+    if code and getattr(sys, "frozen", False):
+        try:
+            input("Press Enter to close...")
+        except EOFError:
+            pass
+    return code
 
 
 if __name__ == "__main__":

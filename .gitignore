@@ -51,3 +51,7 @@ streamlit.log
 
 # Per-server DB credentials for the cron-launched replay watchdog - never commit
 /.env.cron
+
+.venv-engine/
+dist-engine/
+build-engine/

@@ -1,0 +1,15 @@
+# Slim dependency set for the Engine exe - only what the render path imports
+# (no web server, database drivers, Firebase, or LLM SDKs beyond openai).
+moviepy==2.2.1
+edge_tts==7.2.7
+openai==2.24.0
+loguru==0.7.3
+requests==2.33.1
+pydantic
+toml
+pyyaml
+pillow
+numpy
+imageio-ffmpeg
+pydub
+pyinstaller
