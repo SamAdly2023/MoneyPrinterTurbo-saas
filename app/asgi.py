@@ -17,7 +17,7 @@ from app.utils import utils
 
 _PUBLIC_PATHS = {
     "/", "/login", "/logout", "/api/v1/auth/session", "/logo.svg", "/logo.png", "/logo-icon.png",
-    "/privacy", "/terms", "/robots.txt", "/sitemap.xml", "/manifest.json",
+    "/privacy", "/terms", "/data-deletion", "/robots.txt", "/sitemap.xml", "/manifest.json",
     # Anonymous visitor pageview beacon fired from the public marketing pages.
     "/api/v1/track/pageview",
     # PayPal's server calling us directly - no browser session cookie exists.
@@ -145,6 +145,11 @@ async def root_page(request: Request):
 @app.get("/login", response_class=HTMLResponse)
 async def login_page():
     return _read_public_html("login.html")
+
+
+@app.get("/data-deletion", response_class=HTMLResponse)
+async def data_deletion_page():
+    return _read_public_html("data-deletion.html")
 
 
 @app.get("/privacy", response_class=HTMLResponse)
