@@ -895,6 +895,30 @@ def run_watchdog_tick() -> None:
                 go_live(uid, channel["id"], force=True)
             except Exception as e:  # noqa: BLE001
                 logger.error(f"replay watchdog: failed to restart channel {channel['id']}: {e}")
+                if "Reconnect YouTube" in str(e):
+                    # A dead refresh token never heals on its own - retrying every
+                    # tick just spams the log. End the stream so the user sees it
+                    # needs reconnecting instead of a "live" stream that isn't.
+                    _end_needs_reconnect(uid, channel["id"])
+
+
+def _end_needs_reconnect(uid: str, channel_id: str) -> None:
+    try:
+        profile, channels = _load(uid)
+        _, channel = _find(channels, channel_id)
+        if channel is None or channel.get("status") != STATUS_LIVE:
+            return
+        channel["auto_restart"] = False
+        channel["status"] = STATUS_ENDED
+        channel["updated_at"] = _now_iso()
+        session = channel.get("session") or {}
+        session["ended_at"] = _now_iso()
+        session["ended_reason"] = "needs_reconnect"
+        channel["session"] = session
+        _save(uid, profile, channels)
+        logger.warning(f"replay watchdog: channel {channel_id} ended - YouTube must be reconnected")
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"replay watchdog: couldn't mark channel {channel_id} as needing reconnect: {e}")
 
 
 def start_watchdog() -> None:
