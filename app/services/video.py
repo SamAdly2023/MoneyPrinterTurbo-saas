@@ -274,9 +274,25 @@ def _fallback_write_videofile(clip, output_file: str, failed_codec: str, reason:
     文件被占用、目录权限、杀软拦截等通用 IO 问题。只有 libx264 能成功写出时，
     才能判断原始失败大概率来自硬件编码器本身，避免误伤后续任务。
     """
+    _apply_single_thread_encode(_DEFAULT_VIDEO_CODEC, kwargs)
     clip.write_videofile(output_file, codec=_DEFAULT_VIDEO_CODEC, **kwargs)
     _disable_runtime_video_codec(failed_codec, reason)
     return _DEFAULT_VIDEO_CODEC
+
+
+def _apply_single_thread_encode(codec: str, kwargs: dict) -> None:
+    """The shared host caps threads/processes per account, and libx264's default
+    thread pool (one per core plus lookahead) fails to start there - MoviePy's
+    ffmpeg writer then dies right after launch and surfaces as "[Errno 32] Broken
+    pipe". Same fix as the live-stream encoder: pin libx264 to one thread
+    (overriding the caller's n_threads). Hardware encoders are left alone."""
+    if codec != _DEFAULT_VIDEO_CODEC:
+        return
+    kwargs["threads"] = 1
+    params = list(kwargs.get("ffmpeg_params") or [])
+    if "-x264-params" not in params:
+        params += ["-x264-params", "threads=1"]
+    kwargs["ffmpeg_params"] = params
 
 
 def _write_videofile_with_codec_fallback(clip, output_file: str, codec: str, **kwargs):
@@ -287,6 +303,7 @@ def _write_videofile_with_codec_fallback(clip, output_file: str, codec: str, **k
     生成任务不能因为高级编码器不可用而整体失败，所以这里把回退集中处理。
     """
     effective_codec = _get_effective_video_codec(codec)
+    _apply_single_thread_encode(effective_codec, kwargs)
     try:
         clip.write_videofile(output_file, codec=effective_codec, **kwargs)
         return effective_codec
@@ -328,6 +345,7 @@ def concat_video_clips_with_ffmpeg(
             fp.write(f"file '{_format_ffmpeg_concat_path(clip_file)}'\n")
 
     def build_command(codec: str) -> list[str]:
+        single_thread = codec == _DEFAULT_VIDEO_CODEC  # see _apply_single_thread_encode
         return [
             utils.get_ffmpeg_binary(),
             "-y",
@@ -342,7 +360,8 @@ def concat_video_clips_with_ffmpeg(
             "-preset",
             _ENCODE_PRESET,
             "-threads",
-            str(threads or 2),
+            "1" if single_thread else str(threads or 2),
+            *(["-x264-params", "threads=1"] if single_thread else []),
             "-pix_fmt",
             "yuv420p",
             output_file,
