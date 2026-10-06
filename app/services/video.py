@@ -624,6 +624,7 @@ def combine_videos(
     processed_clips = []
     subclipped_items = []
     video_duration = 0
+    last_clip_error = ""
     for video_path in video_paths:
         clip = _open_video_clip_quietly(video_path)
         clip_duration = clip.duration
@@ -751,8 +752,9 @@ def combine_videos(
             video_duration += clip_duration_saved
             
         except Exception as e:
+            last_clip_error = f"{type(e).__name__}: {e}"
             logger.error(f"failed to process clip: {str(e)}")
-    
+
     # loop processed clips until the video duration covers the audio duration and the small safety margin.
     if video_duration < required_video_duration:
         logger.warning(
@@ -780,6 +782,10 @@ def combine_videos(
         # found" - the real problem (no usable stock footage could be found
         # or downloaded for this script/keywords) never surfaced. Fail
         # clearly at the actual point of failure instead.
+        if last_clip_error:
+            raise RuntimeError(
+                f"video clips were downloaded but none could be processed ({last_clip_error})"
+            )
         raise RuntimeError(
             "no usable video clips were found or downloaded for this script - "
             "check the configured video source/API keys, or try different keywords"
