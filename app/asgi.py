@@ -108,7 +108,14 @@ async def auth_gate(request: Request, call_next):
     # controllers/v1/external.py) instead of the session cookie - a
     # different trust boundary entirely, meant to be called by other
     # platforms that have no way to hold a browser session.
-    if path in _PUBLIC_PATHS or path.startswith("/media/") or path.startswith("/api/v1/external/"):
+    # /api/v1/engine/* is the downloadable Engine app, which authenticates with
+    # its own Bearer key (controllers/v1/engine.py) - it has no browser session.
+    if (
+        path in _PUBLIC_PATHS
+        or path.startswith("/media/")
+        or path.startswith("/api/v1/external/")
+        or path.startswith("/api/v1/engine/")
+    ):
         return _no_store(await call_next(request))
 
     user = auth.get_current_user(request)

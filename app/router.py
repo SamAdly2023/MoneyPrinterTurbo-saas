@@ -9,7 +9,7 @@ Resources:
 
 from fastapi import APIRouter
 
-from app.controllers.v1 import admin, auth, external, llm, saas, track, video
+from app.controllers.v1 import admin, auth, engine, external, llm, saas, track, video
 
 root_api_router = APIRouter()
 # v1
@@ -20,3 +20,4 @@ root_api_router.include_router(auth.router)
 root_api_router.include_router(admin.router)
 root_api_router.include_router(track.router)
 root_api_router.include_router(external.router)
+root_api_router.include_router(engine.router)

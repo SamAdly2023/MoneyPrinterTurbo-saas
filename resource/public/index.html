@@ -560,6 +560,24 @@
     <section class="view" id="view-api">
       <div class="page-head"><div><h2>API Access</h2><p>Trigger video generation from another platform - a script, Zapier, Make, your own app.</p></div></div>
 
+      <div class="card" id="engine-card">
+        <div class="section-title">Vidzy Engine - render on your own computer</div>
+        <p class="hint">Connect the Vidzy Engine app to render your videos on your own PC instead of waiting in the shared server queue. Stock-footage videos go to your Engine while it's online; anything it can't do, or if it goes offline, falls back to the server automatically.</p>
+        <p class="hint" id="engine-status">Loading…</p>
+        <div class="row" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+          <button class="btn primary" id="engine-generate">Generate Engine key</button>
+          <button class="btn" id="engine-toggle" style="display:none">Pause Engine rendering</button>
+          <button class="btn danger" id="engine-revoke" style="display:none">Unpair</button>
+        </div>
+        <div id="engine-key-reveal" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:11px;padding:14px;margin-top:8px">
+          <p class="hint" style="color:#f5c56b;margin:0 0 8px">⚠ Paste this key into the Engine app now - you won't be able to see it again. Generating a new key disables the old one.</p>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="engine-key-value" readonly style="font-family:monospace;font-size:13px" />
+            <button class="btn sm" id="engine-key-copy">Copy</button>
+          </div>
+        </div>
+      </div>
+
       <div class="card">
         <div class="section-title">Your API key</div>
         <p class="hint" id="api-key-status">Loading…</p>
@@ -770,7 +788,7 @@ function show(view){
   const nav=document.querySelector('.nav-item[data-view="'+view+'"]');if(nav)nav.classList.add("active");
   if(view==="settings")loadSettings();
   if(view==="profile")loadProfile();
-  if(view==="api")loadApiKey();
+  if(view==="api"){loadApiKey();loadEngine();}
   if(view==="credits")loadCredits();
   if(view==="replay"){loadReplayChannels();loadStreamsPlan();}
   if(view!=="replay-studio")stopStudioPoll();
@@ -793,6 +811,8 @@ document.addEventListener("click",e=>{const el=e.target.closest("[data-view]");i
 const STATUS_META={
   pending:{cls:"pending",ic:"🕓",label:"Pending"},
   processing:{cls:"processing",ic:'<span class="spin">⚙️</span>',label:"In progress"},
+  engine_pending:{cls:"pending",ic:"💻",label:"Waiting for your Engine"},
+  engine_processing:{cls:"processing",ic:'<span class="spin">💻</span>',label:"Rendering on your computer"},
   done:{cls:"done",ic:"✅",label:"Completed"},
   failed:{cls:"failed",ic:"⚠️",label:"Failed"},
 };
@@ -830,7 +850,7 @@ function renderJob(j,isRecent){
     </div>`;
   }
   let bar="";
-  if(j.status==="processing"){bar=`<div class="progress"><div class="bar" style="width:${j.progress||1}%"></div></div>`;}
+  if(j.status==="processing"||j.status==="engine_processing"){bar=`<div class="progress"><div class="bar" style="width:${j.progress||1}%"></div></div>`;}
   let err="";
   if(j.status==="failed"&&j.error){err=`<div class="err">${esc(j.error)}</div>`;}
   let pub="";
@@ -855,7 +875,7 @@ function renderJob(j,isRecent){
         <div class="sub">${esc(p.video_subject||"")}</div>
         <div class="meta">${(p.video_aspect||"")} · ${(p.video_source||"")} · added ${fmtDate(j.created_at)}</div>
       </div>
-      <span class="pill ${m.cls}">${m.ic} ${m.label}${j.status==="processing"?" "+(j.progress||0)+"%":""}</span>
+      <span class="pill ${m.cls}">${m.ic} ${m.label}${(j.status==="processing"||j.status==="engine_processing")?" "+(j.progress||0)+"%":""}</span>
     </div>
     ${bar}${media}${kit}${pub}${err}${actions}
   </div>`;
@@ -1927,6 +1947,55 @@ function apiExampleSnippets(){
 `curl ${base}/api/v1/external/v1/videos \\
   -H "Authorization: Bearer YOUR_API_KEY"`;
 }
+let engineState=null;
+async function loadEngine(){
+  try{
+    const d=engineState=await api("/engine/device");
+    const st=$("#engine-status");
+    if(!d.paired){
+      st.textContent="Not connected. Generate a key, then paste it into the Engine app.";
+    }else if(d.online){
+      st.textContent="🟢 "+(d.name||"Your computer")+" is online"+(d.app_version?" (Engine "+d.app_version+")":"")+(d.enabled?" - rendering your videos.":" - paused, the server is rendering.");
+    }else{
+      st.textContent="⚪ "+(d.name||"Your computer")+" is offline"+(d.last_seen?" (last seen "+fmtDate(d.last_seen)+")":"")+" - the server is rendering your videos.";
+    }
+    $("#engine-generate").textContent=d.paired?"Replace key":"Generate Engine key";
+    $("#engine-toggle").style.display=d.paired?"inline-flex":"none";
+    $("#engine-toggle").textContent=d.enabled?"Pause Engine rendering":"Resume Engine rendering";
+    $("#engine-revoke").style.display=d.paired?"inline-flex":"none";
+  }catch(e){$("#engine-status").textContent="Could not load Engine status"}
+}
+$("#engine-generate").onclick=async()=>{
+  if(engineState&&engineState.paired&&!confirm("Generating a new key immediately disconnects the current Engine. Continue?"))return;
+  const btn=$("#engine-generate");btn.disabled=true;
+  try{
+    const d=await api("/engine/device/key",{method:"POST",body:JSON.stringify({name:""})});
+    $("#engine-key-value").value=d.key;
+    $("#engine-key-reveal").style.display="block";
+    await loadEngine();
+    toast("Engine key generated");
+  }catch(e){toast(e.message,"err")}
+  finally{btn.disabled=false}
+};
+$("#engine-toggle").onclick=async()=>{
+  try{
+    await api("/engine/device/enabled",{method:"POST",body:JSON.stringify({enabled:!(engineState&&engineState.enabled)})});
+    await loadEngine();
+  }catch(e){toast(e.message,"err")}
+};
+$("#engine-revoke").onclick=async()=>{
+  if(!confirm("Unpair the Engine? It will stop working and any waiting videos go back to the server."))return;
+  try{
+    await api("/engine/device",{method:"DELETE"});
+    $("#engine-key-reveal").style.display="none";
+    await loadEngine();
+    toast("Engine unpaired");
+  }catch(e){toast(e.message,"err")}
+};
+$("#engine-key-copy").onclick=async()=>{
+  try{await navigator.clipboard.writeText($("#engine-key-value").value);toast("Copied");}
+  catch(e){toast("Copy failed","err")}
+};
 async function loadApiKey(){
   apiExampleSnippets();
   try{

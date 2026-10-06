@@ -36,7 +36,7 @@ from pydantic import BaseModel
 
 from app.controllers.v1.base import new_router
 from app.models.schema import MaterialInfo, VideoParams
-from app.services import auth, billing, clips, firestore_db, llm, publish, replay, saas
+from app.services import auth, billing, clips, engine_link, firestore_db, llm, publish, replay, saas
 from app.utils import utils
 
 router = new_router()
@@ -389,10 +389,15 @@ def _build_params(global_settings: dict, body: JobBody, profile: dict = None) ->
 @router.get("/saas/jobs", summary="List this user's jobs")
 def list_jobs(request: Request):
     uid = _uid(request)
+    engine_link.sweep_user(uid)  # returns any stranded Engine jobs to the server queue
     jobs = saas.store.all(uid)
     counts = {"pending": 0, "processing": 0, "done": 0, "failed": 0}
     for j in jobs:
-        counts[j["status"]] = counts.get(j["status"], 0) + 1
+        # Engine states count as their ordinary equivalents in the totals.
+        bucket = {engine_link.STATUS_ENGINE_PENDING: "pending", engine_link.STATUS_ENGINE_PROCESSING: "processing"}.get(
+            j["status"], j["status"]
+        )
+        counts[bucket] = counts.get(bucket, 0) + 1
     status = saas.engine.status(uid)
     status["auto_mode"] = firestore_db.get_user_profile(uid).get("auto_mode", False)
     return utils.get_response(200, {"jobs": jobs, "counts": counts, "engine": status})
@@ -449,8 +454,14 @@ def retry_job(request: Request, job_id: str = Path(...)):
     job = saas.store.get(uid, job_id)
     if not job:
         return utils.get_response(404, message="job not found")
-    saas.store.update(uid, job_id, status=saas.STATUS_PENDING, progress=0, error="", videos=[])
-    saas.engine.wake()
+    to_engine = job.get("kind", "generate") == "generate" and engine_link.should_route(uid, job.get("params") or {})
+    saas.store.update(
+        uid, job_id,
+        status=engine_link.STATUS_ENGINE_PENDING if to_engine else saas.STATUS_PENDING,
+        progress=0, error="", videos=[], claimed_by="", claim_nonce="",
+    )
+    if not to_engine:
+        saas.engine.wake()
     return utils.get_response(200, saas.store.get(uid, job_id))
 
 

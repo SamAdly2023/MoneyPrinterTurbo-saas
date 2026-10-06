@@ -37,6 +37,7 @@ from app.models import const
 from app.models.schema import MaterialInfo, VideoParams
 from app.services import billing
 from app.services import clips
+from app.services import engine_link
 from app.services import firestore_db
 from app.services import llm
 from app.services import publish
@@ -169,7 +170,14 @@ def create_job(uid: str, title: str, params: dict, auto: bool = False, kind: str
         "task_id": "",
         "auto": auto,
     }
+    if kind == "generate" and engine_link.should_route(uid, params):
+        # The user's own Vidzy Engine is online and will render this one - the
+        # server's workers only ever claim "pending", so they leave it alone.
+        job["status"] = engine_link.STATUS_ENGINE_PENDING
     job = store.add(uid, job)
+    if job["status"] == engine_link.STATUS_ENGINE_PENDING:
+        logger.info(f"queued {kind} job {job['id']} for {uid} on their Engine - {job['title']}")
+        return job
     # In cloudrun_job mode the API does not render anything itself - it starts
     # a Job execution that does. If that call fails for any reason we fall
     # back to the in-process engine rather than leaving the job stranded.
@@ -936,34 +944,41 @@ class Engine:
         else:
             urls = _collect_outputs(job_id, task_id, result)
             final_script = result.get("script", "") or job["params"].get("video_script", "")
-            subject = job["params"].get("video_subject", job.get("title", ""))
+            self.finalize_job(uid, job, urls, final_script)
 
-            # Cross-platform publishing metadata (title / description / tags).
-            meta = {}
-            meta_file = ""
-            try:
-                with _user_config_scope(uid) as profile:
-                    meta = generate_publish_metadata(
-                        subject, final_script, profile, video_aspect=job["params"].get("video_aspect", "9:16")
-                    )
-                meta_file = _write_publish_file(job_id, meta)
-            except Exception as e:  # never fail a rendered video over metadata
-                logger.warning(f"job {job_id}: metadata generation failed: {e}")
-                meta = {"title": job.get("title", subject), "description": "", "tags": []}
+    def finalize_job(self, uid: str, job: dict, urls: list, final_script: str):
+        """Mark a rendered job done: publishing metadata, then auto-publish.
+        Shared by the server's own renders and by videos the user's Engine
+        uploads (see controllers/v1/engine.py)."""
+        job_id = job["id"]
+        subject = job["params"].get("video_subject", job.get("title", ""))
 
-            store.update(
-                uid, job_id,
-                status=STATUS_DONE,
-                progress=100,
-                videos=urls,
-                script=final_script,
-                meta=meta,
-                meta_file=meta_file,
-                error="",
-            )
-            logger.success(f"job {job_id} done, {len(urls)} video(s)")
-            with _user_config_scope(uid):
-                self._auto_publish(uid, job_id, urls, meta)
+        # Cross-platform publishing metadata (title / description / tags).
+        meta = {}
+        meta_file = ""
+        try:
+            with _user_config_scope(uid) as profile:
+                meta = generate_publish_metadata(
+                    subject, final_script, profile, video_aspect=job["params"].get("video_aspect", "9:16")
+                )
+            meta_file = _write_publish_file(job_id, meta)
+        except Exception as e:  # never fail a rendered video over metadata
+            logger.warning(f"job {job_id}: metadata generation failed: {e}")
+            meta = {"title": job.get("title", subject), "description": "", "tags": []}
+
+        store.update(
+            uid, job_id,
+            status=STATUS_DONE,
+            progress=100,
+            videos=urls,
+            script=final_script,
+            meta=meta,
+            meta_file=meta_file,
+            error="",
+        )
+        logger.success(f"job {job_id} done, {len(urls)} video(s)")
+        with _user_config_scope(uid):
+            self._auto_publish(uid, job_id, urls, meta)
 
     def _process_clip_job(self, uid: str, job: dict):
         """Cut, letterbox and caption one highlight segment from an uploaded

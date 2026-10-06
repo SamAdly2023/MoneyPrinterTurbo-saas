@@ -862,6 +862,13 @@ def run_watchdog_tick() -> None:
             logger.error(f"replay watchdog: couldn't load profile for {uid}: {e}")
             continue
 
+        try:
+            from app.services import engine_link
+
+            engine_link.sweep_if_offline(uid, profile)
+        except Exception as e:  # noqa: BLE001 - never let this break stream watching
+            logger.warning(f"engine sweep failed for {uid}: {e}")
+
         for channel in profile.get("replay_channels") or []:
             if not channel.get("is_real"):
                 continue
