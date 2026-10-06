@@ -286,8 +286,8 @@ def _apply_single_thread_encode(codec: str, kwargs: dict) -> None:
     ffmpeg writer then dies right after launch and surfaces as "[Errno 32] Broken
     pipe". Same fix as the live-stream encoder: pin libx264 to one thread
     (overriding the caller's n_threads). Hardware encoders are left alone."""
-    if codec != _DEFAULT_VIDEO_CODEC:
-        return
+    if codec != _DEFAULT_VIDEO_CODEC or os.getenv("MPT_ENCODE_AUTO_THREADS"):
+        return  # (the Engine app sets MPT_ENCODE_AUTO_THREADS - a user's own PC has no such limit)
     kwargs["threads"] = 1
     params = list(kwargs.get("ffmpeg_params") or [])
     if "-x264-params" not in params:
@@ -345,7 +345,7 @@ def concat_video_clips_with_ffmpeg(
             fp.write(f"file '{_format_ffmpeg_concat_path(clip_file)}'\n")
 
     def build_command(codec: str) -> list[str]:
-        single_thread = codec == _DEFAULT_VIDEO_CODEC  # see _apply_single_thread_encode
+        single_thread = codec == _DEFAULT_VIDEO_CODEC and not os.getenv("MPT_ENCODE_AUTO_THREADS")  # see _apply_single_thread_encode
         return [
             utils.get_ffmpeg_binary(),
             "-y",

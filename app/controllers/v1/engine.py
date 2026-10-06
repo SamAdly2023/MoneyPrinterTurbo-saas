@@ -40,6 +40,9 @@ router = new_router()
 # Oldest Engine build the server still talks to; lets us force an upgrade if
 # the job format ever changes incompatibly.
 MIN_ENGINE_VERSION = "0.1.0"
+# How often an idle Engine checks in. Every Engine online is one request per
+# interval against a shared host, so keep this generous.
+POLL_SECONDS = 30
 # Finished-video upload cap. The shared host rejects very large request bodies
 # outright, so say so clearly instead of letting the Engine see a bare 500.
 MAX_UPLOAD_BYTES = 140 * 1024 * 1024
@@ -115,11 +118,17 @@ def heartbeat(request: Request, body: HeartbeatBody):
     engine_link.heartbeat(uid, body.model_dump())
     user = firestore_db.get_user(uid) or {}
     profile = firestore_db.get_user_profile(uid)
+    enabled = bool(profile.get("engine_prefer"))
     return utils.get_response(200, {
         "ok": True,
         "email": user.get("email", ""),
-        "enabled": bool(profile.get("engine_prefer")),
+        "enabled": enabled,
         "min_engine_version": MIN_ENGINE_VERSION,
+        # Jobs waiting for this Engine. It only calls /claim when this is > 0,
+        # and the server - not the client - decides how often to check in, so
+        # polling load on the shared host can be tuned without a new release.
+        "pending": engine_link.pending_count(uid) if enabled else 0,
+        "poll_seconds": POLL_SECONDS,
     })
 
 
@@ -163,8 +172,6 @@ def claim(request: Request):
     uid = _engine_uid(request)
     if not uid:
         return utils.get_response(401, message=_DENIED)
-    engine_link.heartbeat(uid, {"version": request.headers.get("x-engine-version", ""),
-                                "platform": request.headers.get("x-engine-platform", "")})
     job = engine_link.claim(uid)
     if not job:
         return utils.get_response(200, {"job": None})

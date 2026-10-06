@@ -192,6 +192,13 @@ def claim(uid: str):
         return fresh
 
 
+def pending_count(uid: str) -> int:
+    """How many jobs are waiting for this user's Engine (reported on heartbeat so
+    the Engine only calls claim when there is something to claim)."""
+    return sum(1 for j in firestore_db.list_jobs(uid)
+               if j.get("status") == STATUS_ENGINE_PENDING and j.get("kind", "generate") == "generate")
+
+
 def authorize_job(uid: str, job_id: str):
     """The job, only if it is currently out on the Engine; otherwise None."""
     from app.services import saas
