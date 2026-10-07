@@ -433,6 +433,66 @@ def facebook_auth_url() -> str:
     return "https://www.facebook.com/v21.0/dialog/oauth?" + urllib.parse.urlencode(params)
 
 
+def _facebook_pages_from_granular_scopes(app_id: str, app_secret: str, user_token: str) -> list:
+    """/me/accounts comes back empty for a Page the user manages only through a
+    business portfolio, even when they explicitly granted it. Facebook records
+    those grants as "granular scopes" on the token, so read the Page ids from
+    there and fetch each Page (and its Page token) directly."""
+    try:
+        dbg = requests.get(
+            f"{META_API}/debug_token",
+            params={"input_token": user_token, "access_token": f"{app_id}|{app_secret}"},
+            timeout=30,
+        ).json().get("data", {})
+    except Exception as e:  # noqa: BLE001 - best effort; the caller reports the failure
+        logger.warning(f"facebook debug_token failed: {e}")
+        return []
+
+    page_ids = []
+    for scope in dbg.get("granular_scopes") or []:
+        if scope.get("scope") in ("pages_show_list", "pages_manage_posts", "pages_read_engagement"):
+            page_ids += scope.get("target_ids") or []
+
+    pages = []
+    for page_id in dict.fromkeys(page_ids):  # de-duplicated, order kept
+        try:
+            r = requests.get(
+                f"{META_API}/{page_id}",
+                params={"fields": "id,name,access_token", "access_token": user_token},
+                timeout=30,
+            )
+            if r.ok and r.json().get("access_token"):
+                pages.append(r.json())
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"facebook page lookup {page_id} failed: {e}")
+    return pages
+
+
+def _facebook_no_page_message(user_token: str) -> str:
+    """Explain WHY no Page came back - 'no Page found' alone sends the user
+    guessing between 'I have no Page' and 'I did not grant it'."""
+    granted, declined = [], []
+    try:
+        perms = requests.get(f"{META_API}/me/permissions", params={"access_token": user_token}, timeout=30)
+        for p in perms.json().get("data", []):
+            (granted if p.get("status") == "granted" else declined).append(p.get("permission", "?"))
+    except Exception:  # noqa: BLE001
+        pass
+    detail = ""
+    if "pages_show_list" not in granted:
+        detail = " Facebook did not grant the 'pages_show_list' permission - click Connect again and approve every permission."
+    elif granted:
+        detail = (
+            " Facebook granted the permissions but returned no Page: open Facebook's permission screen again "
+            "(Connect), choose 'Edit settings' and tick your Page, and make sure this account is an admin of the Page."
+        )
+    return (
+        "No Facebook Page found on this account - create or get added to a Page first."
+        + detail
+        + (f" [granted: {', '.join(granted) or 'none'}; declined: {', '.join(declined) or 'none'}]" if (granted or declined) else "")
+    )
+
+
 def facebook_exchange_code(uid: str, code: str) -> dict:
     settings = _global()
     app_id = settings.get("facebook_app_id", "")
@@ -474,7 +534,9 @@ def facebook_exchange_code(uid: str, code: str) -> dict:
     pages_resp.raise_for_status()
     pages = pages_resp.json().get("data", [])
     if not pages:
-        raise RuntimeError("No Facebook Page found on this account - create or get added to a Page first")
+        pages = _facebook_pages_from_granular_scopes(app_id, app_secret, user_token)
+    if not pages:
+        raise RuntimeError(_facebook_no_page_message(user_token))
 
     # v1: connect the first Page returned. Most single-business accounts
     # only manage one Page; multi-page selection can follow later.
