@@ -677,6 +677,11 @@ def facebook_callback(request: Request, code: str = "", error: str = ""):
         return _popup_close_html(f"Facebook connection failed: {error or 'no code'}", ok=False)
     try:
         info = publish.facebook_exchange_code(user["uid"], code)
+        if info.get("pending"):
+            return _popup_close_html(
+                f"Facebook login worked - Facebook returned {info['count']} Pages. "
+                "Go back to Vidzy and choose which one to connect."
+            )
         label = info.get("page_name") or "Page"
         if info.get("ig_username"):
             label += f" + Instagram @{info['ig_username']}"
@@ -684,6 +689,26 @@ def facebook_callback(request: Request, code: str = "", error: str = ""):
     except Exception as e:  # noqa: BLE001
         logger.error(f"facebook callback failed: {e}")
         return _popup_close_html(f"Facebook connection failed: {e}", ok=False)
+
+
+class FacebookPageBody(BaseModel):
+    page_id: str
+
+
+@router.get("/saas/facebook/pages", summary="Pages waiting for the user to choose one")
+def facebook_pages(request: Request):
+    uid = _uid(request)
+    return utils.get_response(200, {"pages": publish.facebook_pending_pages(uid)})
+
+
+@router.post("/saas/facebook/select", summary="Connect the chosen Facebook Page (and its linked Instagram)")
+def facebook_select(request: Request, body: FacebookPageBody):
+    uid = _uid(request)
+    try:
+        publish.facebook_select_page(uid, body.page_id)
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    return utils.get_response(200, publish.status(uid))
 
 
 @router.get("/saas/linkedin/callback", summary="LinkedIn OAuth callback")

@@ -538,13 +538,33 @@ def facebook_exchange_code(uid: str, code: str) -> dict:
     if not pages:
         raise RuntimeError(_facebook_no_page_message(user_token))
 
-    # v1: connect the first Page returned. Most single-business accounts
-    # only manage one Page; multi-page selection can follow later.
-    page = pages[0]
-    page_id = page.get("id", "")
-    page_token = page.get("access_token", "")
-    page_name = page.get("name", "")
+    if len(pages) > 1:
+        # More than one Page: don't guess - park them (with their linked
+        # Instagram account) and let the user choose in the dashboard.
+        candidates = []
+        for pg in pages[:25]:
+            ig_id, ig_name = _facebook_linked_instagram(pg.get("id", ""), pg.get("access_token", ""))
+            candidates.append({
+                "id": pg.get("id", ""), "name": pg.get("name", ""),
+                "access_token": pg.get("access_token", ""),
+                "ig_user_id": ig_id, "ig_username": ig_name,
+            })
+        firestore_db.save_user_social(uid, "facebook_pending", {
+            "pages": candidates, "expires_in": expires_in, "created": time.time(),
+        })
+        logger.info(f"Facebook login for {uid} returned {len(candidates)} Pages - waiting for the user to choose")
+        return {"pending": True, "count": len(candidates)}
 
+    page = pages[0]
+    ig_id, ig_name = _facebook_linked_instagram(page.get("id", ""), page.get("access_token", ""))
+    return _facebook_save_page(uid, {
+        "id": page.get("id", ""), "name": page.get("name", ""), "access_token": page.get("access_token", ""),
+        "ig_user_id": ig_id, "ig_username": ig_name,
+    }, expires_in)
+
+
+def _facebook_linked_instagram(page_id: str, page_token: str) -> tuple:
+    """(instagram_business_account id, username) for a Page, or ("", "")."""
     ig_user_id, ig_username = "", ""
     try:
         ig_resp = requests.get(
@@ -563,26 +583,56 @@ def facebook_exchange_code(uid: str, code: str) -> dict:
                 ig_username = ig_info.json().get("username", "")
     except Exception as e:  # noqa: BLE001 - Facebook connection still succeeds without Instagram
         logger.warning(f"could not resolve linked Instagram account: {e}")
+    return ig_user_id, ig_username
 
+
+def _facebook_save_page(uid: str, page: dict, expires_in: int) -> dict:
     info = {
-        "access_token": page_token,
-        "expiry": time.time() + expires_in - 60,
-        "page_id": page_id,
-        "page_name": page_name,
-        "ig_user_id": ig_user_id,
-        "ig_username": ig_username,
+        "access_token": page["access_token"],
+        "expiry": time.time() + int(expires_in) - 60,
+        "page_id": page["id"],
+        "page_name": page["name"],
+        "ig_user_id": page.get("ig_user_id", ""),
+        "ig_username": page.get("ig_username", ""),
     }
     firestore_db.save_user_social(uid, "facebook", info)
+    firestore_db.clear_user_social(uid, "facebook_pending")
     logger.success(
-        f"Facebook connected for {uid}: {page_name}" + (f" (Instagram: @{ig_username})" if ig_username else "")
+        f"Facebook connected for {uid}: {info['page_name']}"
+        + (f" (Instagram: @{info['ig_username']})" if info["ig_username"] else "")
     )
     return info
+
+
+_FB_PENDING_TTL = 3600  # seconds the Page list waits for the user to choose
+
+
+def facebook_pending_pages(uid: str) -> list:
+    """The Pages the user can still choose from (no tokens), or []."""
+    pending = firestore_db.get_user_social(uid).get("facebook_pending") or {}
+    if not pending.get("pages") or time.time() - pending.get("created", 0) > _FB_PENDING_TTL:
+        return []
+    return [
+        {"id": p["id"], "name": p["name"], "instagram": p.get("ig_username", "")}
+        for p in pending["pages"]
+    ]
+
+
+def facebook_select_page(uid: str, page_id: str) -> dict:
+    pending = firestore_db.get_user_social(uid).get("facebook_pending") or {}
+    if not facebook_pending_pages(uid):
+        raise ValueError("That Page list has expired - click Facebook and connect again.")
+    for page in pending["pages"]:
+        if page["id"] == page_id:
+            return _facebook_save_page(uid, page, pending.get("expires_in", 60 * 24 * 3600))
+    raise ValueError("That Page isn't one of the Pages Facebook returned for you.")
 
 
 def facebook_status(uid: str) -> dict:
     info = firestore_db.get_user_social(uid).get("facebook", {})
     return {
         "connected": bool(info.get("access_token")),
+        "pending_pages": len(facebook_pending_pages(uid)),
         "page": info.get("page_name", ""),
         "instagram": info.get("ig_username", ""),
     }
@@ -671,6 +721,8 @@ def instagram_upload(uid: str, video_public_url: str, caption: str) -> dict:
 # --------------------------------------------------------------------------- #
 def disconnect(uid: str, platform: str):
     firestore_db.clear_user_social(uid, platform)
+    if platform == "facebook":
+        firestore_db.clear_user_social(uid, "facebook_pending")
 
 
 # --------------------------------------------------------------------------- #

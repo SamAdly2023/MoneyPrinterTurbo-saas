@@ -764,6 +764,16 @@
     </section>
   </main>
 </div>
+<div id="fb-modal" style="display:none;position:fixed;inset:0;background:rgba(5,8,16,.72);z-index:60;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--panel,#141b2d);border:1px solid var(--border,#232d45);border-radius:14px;max-width:460px;width:100%;padding:20px;max-height:85vh;overflow:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <h3 id="fb-modal-title" style="margin:0;font-size:17px">Facebook &amp; Instagram</h3>
+      <button class="btn sm" id="fb-modal-close">✕</button>
+    </div>
+    <p class="hint" id="fb-modal-sub" style="margin:0 0 12px"></p>
+    <div id="fb-modal-body" style="display:flex;flex-direction:column;gap:8px"></div>
+  </div>
+</div>
 <div id="toast"></div>
 <div class="video-modal-backdrop" id="video-modal" style="display:none">
   <div class="video-modal">
@@ -891,6 +901,7 @@ function renderJob(j,isRecent){
 
 let social={youtube:{connected:false},tiktok:{connected:false},facebook:{connected:false}};
 let socialSig="";
+let fbPendingShown=0;
 async function refreshSocial(){
   try{
     const d=await api("/social/status");
@@ -901,7 +912,8 @@ async function refreshSocial(){
     tt.className="btn"+(d.tiktok.connected?" connected":"");
     tt.textContent=d.tiktok.connected?"◆ TikTok ✓":"◆ TikTok";
     fb.className="btn"+(d.facebook.connected?" connected":"");
-    fb.textContent=d.facebook.connected?("📘 Facebook ✓"+(d.facebook.instagram?" +IG":"")):"📘 Facebook";
+    fb.textContent=d.facebook.connected?("📘 Facebook ✓"+(d.facebook.page?" "+d.facebook.page:"")+(d.facebook.instagram?" +IG":"")):"📘 Facebook";
+    if(d.facebook.pending_pages>0 && fbPendingShown!==d.facebook.pending_pages){fbPendingShown=d.facebook.pending_pages;openFbChooser();}
     const liOn=d.linkedin&&d.linkedin.connected;
     li.className="btn"+(liOn?" connected":"");
     // An expired member token still looks "connected" in the database, so say
@@ -917,7 +929,7 @@ async function refreshSocial(){
     }
     rumble.className="btn"+(d.rumble&&d.rumble.connected?" connected":"");
     rumble.textContent=d.rumble&&d.rumble.connected?"📡 Rumble ✓":"📡 Rumble";
-    const ns=JSON.stringify([d.youtube.connected,d.youtube.channel,d.tiktok.connected,d.facebook.connected,d.facebook.instagram,liOn,biliOK&&d.bilibili.connected,d.rumble&&d.rumble.connected]);
+    const ns=JSON.stringify([d.youtube.connected,d.youtube.channel,d.tiktok.connected,d.facebook.connected,d.facebook.page,d.facebook.instagram,liOn,biliOK&&d.bilibili.connected,d.rumble&&d.rumble.connected]);
     if(ns!==socialSig){socialSig=ns;lastSig="";}   // refresh job cards so publish buttons update
   }catch(e){}
 }
@@ -1513,8 +1525,44 @@ $("#tt-btn").onclick=()=>{
   if(social.tiktok&&social.tiktok.connected){ if(confirm("Disconnect TikTok?"))api("/tiktok/disconnect",{method:"POST"}).then(()=>{refreshSocial();toast("TikTok disconnected")}); }
   else connectPlatform("tiktok");
 };
+function closeFbModal(){$("#fb-modal").style.display="none"}
+$("#fb-modal-close").onclick=closeFbModal;
+$("#fb-modal").addEventListener("click",e=>{if(e.target.id==="fb-modal")closeFbModal()});
+function fbRow(label,sub,onclick,danger){
+  const b=document.createElement("button");
+  b.className="btn"+(danger?" danger":"");
+  b.style.cssText="text-align:left;justify-content:flex-start;flex-direction:column;align-items:flex-start;gap:2px;padding:10px 14px";
+  b.innerHTML="<b>"+esc(label)+"</b>"+(sub?"<span class='hint' style='margin:0'>"+esc(sub)+"</span>":"");
+  b.onclick=onclick;return b;
+}
+async function openFbChooser(){
+  try{
+    const d=await api("/facebook/pages");
+    if(!d.pages||!d.pages.length)return;
+    $("#fb-modal-title").textContent="Choose your Facebook Page";
+    $("#fb-modal-sub").textContent="Vidzy will post to this Page. The Instagram account linked to the Page (if any) is used for Instagram.";
+    const body=$("#fb-modal-body");body.innerHTML="";
+    d.pages.forEach(pg=>body.appendChild(fbRow(pg.name,pg.instagram?("Instagram: @"+pg.instagram):"No Instagram account linked to this Page",async()=>{
+      try{await api("/facebook/select",{method:"POST",body:JSON.stringify({page_id:pg.id})});closeFbModal();fbPendingShown=0;await refreshSocial();toast("Connected "+pg.name+(pg.instagram?" + Instagram @"+pg.instagram:""));}
+      catch(e){toast(e.message,"err")}
+    })));
+    $("#fb-modal").style.display="flex";
+  }catch(e){toast(e.message,"err")}
+}
+function openFbManage(){
+  const f=social.facebook||{};
+  $("#fb-modal-title").textContent="Facebook & Instagram";
+  $("#fb-modal-sub").textContent="Connected Page: "+(f.page||"-")+(f.instagram?" · Instagram: @"+f.instagram:" · no Instagram linked");
+  const body=$("#fb-modal-body");body.innerHTML="";
+  body.appendChild(fbRow("Change Page","Log in again and pick a different Page or Instagram account",()=>{closeFbModal();connectPlatform("facebook");}));
+  body.appendChild(fbRow("Disconnect","Removes Vidzy's access to your Page and Instagram",async()=>{
+    closeFbModal();await api("/facebook/disconnect",{method:"POST"});refreshSocial();toast("Facebook disconnected");
+  },true));
+  $("#fb-modal").style.display="flex";
+}
 $("#fb-btn").onclick=()=>{
-  if(social.facebook&&social.facebook.connected){ if(confirm("Disconnect Facebook (and Instagram)?"))api("/facebook/disconnect",{method:"POST"}).then(()=>{refreshSocial();toast("Facebook disconnected")}); }
+  if(social.facebook&&social.facebook.pending_pages>0)openFbChooser();
+  else if(social.facebook&&social.facebook.connected)openFbManage();
   else connectPlatform("facebook");
 };
 $("#li-btn").onclick=()=>{
