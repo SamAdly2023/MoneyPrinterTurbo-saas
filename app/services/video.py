@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from contextlib import redirect_stdout
 from functools import lru_cache
 from typing import List
@@ -473,6 +474,44 @@ def _build_contact_card_clip(
     return card.with_start(max(0.0, video_duration - card_duration)).with_duration(card_duration).with_position((x, y))
 
 
+def _install_single_thread_reader() -> None:
+    """Make MoviePy's ffmpeg *readers* single-threaded too.
+
+    _apply_single_thread_encode() pins the encoder, but every clip is also
+    opened through MoviePy's reader, which starts `ffmpeg -i clip ...` with no
+    thread limit and swallows ffmpeg's stderr. On the shared host (which also
+    runs 24/7 live-stream ffmpegs) that process can fail to get its decoder
+    threads, and MoviePy reports it as "failed to read the first frame of
+    video file ... may be corrupted" even though the file is fine. A user's own
+    PC (the Engine) has no such limit and keeps the default."""
+    if os.getenv("MPT_ENCODE_AUTO_THREADS"):
+        return
+    try:
+        from moviepy.video.io import ffmpeg_reader
+    except Exception:  # noqa: BLE001 - moviepy layout changed; leave it alone
+        return
+    real = getattr(ffmpeg_reader, "sp", None)
+    if real is None or getattr(real, "_vidzy_single_thread", False):
+        return
+
+    class _SubprocessProxy:
+        _vidzy_single_thread = True
+
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+        @staticmethod
+        def Popen(cmd, *args, **kwargs):
+            if isinstance(cmd, list) and cmd and "-threads" not in cmd:
+                cmd = [cmd[0], "-threads", "1", "-filter_threads", "1", *cmd[1:]]
+            return real.Popen(cmd, *args, **kwargs)
+
+    ffmpeg_reader.sp = _SubprocessProxy()
+
+
+_install_single_thread_reader()
+
+
 def _open_video_clip_quietly(video_path: str, audio: bool = False) -> VideoFileClip:
     """
     安静地打开视频文件，避免 MoviePy 2.1.x 把 ffmpeg 探测信息直接打印到 stdout。
@@ -490,8 +529,19 @@ def _open_video_clip_quietly(video_path: str, audio: bool = False) -> VideoFileC
     3. 如果依赖库确实输出了内容，降级为 debug 日志，便于必要时排查。
     """
     captured_stdout = io.StringIO()
-    with redirect_stdout(captured_stdout):
-        clip = VideoFileClip(video_path, audio=audio)
+    clip = None
+    for attempt in range(3):
+        try:
+            with redirect_stdout(captured_stdout):
+                clip = VideoFileClip(video_path, audio=audio)
+            break
+        except Exception as exc:  # noqa: BLE001
+            # A reader that fails to start under resource pressure usually
+            # succeeds a moment later; a genuinely corrupt file fails every time.
+            if attempt == 2:
+                raise
+            logger.warning(f"opening {os.path.basename(video_path)} failed ({exc}); retrying")
+            time.sleep(1.5 * (attempt + 1))
 
     moviepy_stdout = captured_stdout.getvalue().strip()
     if moviepy_stdout:
@@ -645,10 +695,15 @@ def combine_videos(
     video_duration = 0
     last_clip_error = ""
     for video_path in video_paths:
-        clip = _open_video_clip_quietly(video_path)
-        clip_duration = clip.duration
-        clip_w, clip_h = clip.size
-        close_clip(clip)
+        try:
+            clip = _open_video_clip_quietly(video_path)
+            clip_duration = clip.duration
+            clip_w, clip_h = clip.size
+            close_clip(clip)
+        except Exception as e:
+            last_clip_error = f"{type(e).__name__}: {e}"
+            logger.error(f"skipping unreadable clip {os.path.basename(video_path)}: {e}")
+            continue
         
         start_time = 0
 
