@@ -2,6 +2,18 @@
 
 import os
 
+# The shared host caps threads per account (NPROC), and every app process counts
+# against it. numpy/OpenBLAS/OpenMP/ctranslate2 each start one thread PER CPU
+# CORE by default - dozens per process on a big server - which is what ends in
+# "pthread_create() failed: Resource temporarily unavailable" and ffmpeg dying
+# mid-render. Pin them to one before anything imports them. setdefault, so a
+# machine that wants more (the Engine, a dev PC) can still override via env.
+for _var in (
+    "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "CT2_INTER_THREADS",
+):
+    os.environ.setdefault(_var, "1")
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -190,6 +202,21 @@ app.mount("/", StaticFiles(directory=public_dir, html=True), name="")
 @app.on_event("shutdown")
 def shutdown_event():
     logger.info("shutdown event")
+
+
+@app.on_event("startup")
+async def limit_request_threadpool():
+    """FastAPI runs every sync endpoint in a thread pool that defaults to 40
+    threads per process. Dashboard polling alone can fill it, and each one is a
+    thread the host counts against the account."""
+    try:
+        import anyio.to_thread
+
+        limit = int(os.getenv("MPT_REQUEST_THREADS", "10"))
+        anyio.to_thread.current_default_thread_limiter().total_tokens = limit
+        logger.info(f"request thread pool limited to {limit}")
+    except Exception as e:  # noqa: BLE001 - an optimisation, never a reason to fail startup
+        logger.warning(f"could not limit the request thread pool: {e}")
 
 
 @app.on_event("startup")
