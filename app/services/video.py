@@ -276,7 +276,7 @@ def _fallback_write_videofile(clip, output_file: str, failed_codec: str, reason:
     才能判断原始失败大概率来自硬件编码器本身，避免误伤后续任务。
     """
     _apply_single_thread_encode(_DEFAULT_VIDEO_CODEC, kwargs)
-    clip.write_videofile(output_file, codec=_DEFAULT_VIDEO_CODEC, **kwargs)
+    _write_with_resource_retry(clip, output_file, codec=_DEFAULT_VIDEO_CODEC, **kwargs)
     _disable_runtime_video_codec(failed_codec, reason)
     return _DEFAULT_VIDEO_CODEC
 
@@ -296,6 +296,26 @@ def _apply_single_thread_encode(codec: str, kwargs: dict) -> None:
     kwargs["ffmpeg_params"] = params
 
 
+_RESOURCE_ERRORS = ("resource temporarily unavailable", "cannot allocate memory", "broken pipe", "cannot fork")
+
+
+def _write_with_resource_retry(clip, output_file: str, **kwargs) -> None:
+    """write_videofile, retried when the host briefly refuses to start a thread
+    or process. Those limits are shared with everything else on the account, so
+    a render that hits one at the wrong instant usually works a few seconds
+    later - failing the whole job (and spending the user's credit) is worse."""
+    for attempt in range(3):
+        try:
+            clip.write_videofile(output_file, **kwargs)
+            return
+        except Exception as exc:  # noqa: BLE001
+            if attempt == 2 or not any(m in str(exc).lower() for m in _RESOURCE_ERRORS):
+                raise
+            logger.warning(f"host resource limit while writing {os.path.basename(output_file)}; retrying ({exc})"[:300])
+            gc.collect()
+            time.sleep(4 * (attempt + 1))
+
+
 def _write_videofile_with_codec_fallback(clip, output_file: str, codec: str, **kwargs):
     """
     使用指定编码器写出视频，失败时自动用 libx264 重试一次。
@@ -306,7 +326,7 @@ def _write_videofile_with_codec_fallback(clip, output_file: str, codec: str, **k
     effective_codec = _get_effective_video_codec(codec)
     _apply_single_thread_encode(effective_codec, kwargs)
     try:
-        clip.write_videofile(output_file, codec=effective_codec, **kwargs)
+        _write_with_resource_retry(clip, output_file, codec=effective_codec, **kwargs)
         return effective_codec
     except Exception as exc:
         if effective_codec == _DEFAULT_VIDEO_CODEC:
@@ -507,6 +527,41 @@ def _install_single_thread_reader() -> None:
             return real.Popen(cmd, *args, **kwargs)
 
     ffmpeg_reader.sp = _SubprocessProxy()
+
+    # The clip's sound is decoded by yet another reader process.
+    try:
+        from moviepy.audio.io import readers as audio_readers
+
+        if not getattr(getattr(audio_readers, "sp", None), "_vidzy_single_thread", False):
+            audio_readers.sp = _SubprocessProxy()
+    except Exception:  # noqa: BLE001
+        pass
+
+    # The audio track is written by a THIRD ffmpeg (MoviePy's temp
+    # "...TEMP_MPY_wvf_snd.mp4"), whose aac encoder and audio filter each get
+    # their own thread - "pthread_create() failed" there kills the whole render.
+    # Its threads option has to sit before the OUTPUT file, not at the front.
+    try:
+        from moviepy.audio.io import ffmpeg_audiowriter
+    except Exception:  # noqa: BLE001
+        return
+    real_audio = getattr(ffmpeg_audiowriter, "sp", None)
+    if real_audio is None or getattr(real_audio, "_vidzy_single_thread", False):
+        return
+
+    class _AudioSubprocessProxy:
+        _vidzy_single_thread = True
+
+        def __getattr__(self, name):
+            return getattr(real_audio, name)
+
+        @staticmethod
+        def Popen(cmd, *args, **kwargs):
+            if isinstance(cmd, list) and len(cmd) > 2 and "-threads" not in cmd:
+                cmd = [cmd[0], "-filter_threads", "1", *cmd[1:-1], "-threads", "1", cmd[-1]]
+            return real_audio.Popen(cmd, *args, **kwargs)
+
+    ffmpeg_audiowriter.sp = _AudioSubprocessProxy()
 
 
 _install_single_thread_reader()

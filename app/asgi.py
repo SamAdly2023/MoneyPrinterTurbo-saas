@@ -13,6 +13,11 @@ for _var in (
     "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "CT2_INTER_THREADS",
 ):
     os.environ.setdefault(_var, "1")
+# glibc gives every thread its own 64MB *virtual* malloc arena. On CloudLinux the
+# account's virtual-memory cap counts those reservations, so a multi-threaded
+# ffmpeg can fail "pthread_create(): Resource temporarily unavailable" with
+# plenty of real memory free. Two arenas keeps it small; ffmpeg children inherit it.
+os.environ.setdefault("MALLOC_ARENA_MAX", "2")
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
