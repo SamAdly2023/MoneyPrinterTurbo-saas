@@ -312,6 +312,7 @@ def _write_with_resource_retry(clip, output_file: str, **kwargs) -> None:
             if attempt == 2 or not any(m in str(exc).lower() for m in _RESOURCE_ERRORS):
                 raise
             logger.warning(f"host resource limit while writing {os.path.basename(output_file)}; retrying ({exc})"[:300])
+            utils.log_resources("write retry")
             gc.collect()
             time.sleep(4 * (attempt + 1))
 

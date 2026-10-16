@@ -53,9 +53,12 @@ def create(audio_file, subtitle_file: str = ""):
                 f"loading model: {model_path}, device: {device}, compute_type: {compute_type}"
             )
             try:
+                # ctranslate2 starts a thread pool sized to the CPU count by default; on
+                # the shared host those threads count against the account's limit.
+                cpu_threads = 0 if os.getenv("MPT_ENCODE_AUTO_THREADS") else int(config.whisper.get("cpu_threads", 1))
                 model = WhisperModel(
                     model_size_or_path=model_path, device=device, compute_type=compute_type,
-                    download_root=download_root,
+                    download_root=download_root, cpu_threads=cpu_threads,
                 )
             except Exception as e:
                 logger.error(

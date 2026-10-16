@@ -159,6 +159,46 @@ def get_ffmpeg_binary() -> str:
     return "ffmpeg"
 
 
+def resource_snapshot() -> str:
+    """One-line picture of what this account is using right now (Linux only):
+    processes, threads, resident memory and ffmpeg count across every process of
+    this user. The shared host enforces limits on exactly these, and when a render
+    dies with "pthread_create() failed" the log should say how close to them it was."""
+    try:
+        import re
+
+        uid = os.getuid()
+    except (AttributeError, ImportError):
+        return "n/a"
+    procs = threads = rss_kb = ffmpeg = 0
+    try:
+        for pid in os.listdir("/proc"):
+            if not pid.isdigit():
+                continue
+            try:
+                with open(f"/proc/{pid}/status", encoding="utf-8", errors="ignore") as fh:
+                    st = fh.read()
+            except OSError:
+                continue
+            m = re.search(r"^Uid:\s+(\d+)", st, re.M)
+            if not m or int(m.group(1)) != uid:
+                continue
+            procs += 1
+            t = re.search(r"^Threads:\s+(\d+)", st, re.M)
+            r = re.search(r"^VmRSS:\s+(\d+)", st, re.M)
+            threads += int(t.group(1)) if t else 0
+            rss_kb += int(r.group(1)) if r else 0
+            if re.search(r"^Name:\s+ffmpeg", st, re.M):
+                ffmpeg += 1
+    except OSError:
+        return "n/a"
+    return f"procs={procs} threads={threads} rss_mb={rss_kb // 1024} ffmpeg={ffmpeg}"
+
+
+def log_resources(tag: str) -> None:
+    logger.info(f"resources [{tag}]: {resource_snapshot()}")
+
+
 def run_in_background(func, *args, **kwargs):
     def run():
         try:
