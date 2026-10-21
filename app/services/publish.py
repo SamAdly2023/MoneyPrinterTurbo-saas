@@ -31,10 +31,11 @@ from loguru import logger
 
 from app.services import firestore_db
 
-YT_SCOPE = (
-    "https://www.googleapis.com/auth/youtube.force-ssl "
-    "https://www.googleapis.com/auth/youtube.readonly"
-)
+# One scope only: force-ssl already covers reading the channel and video
+# statistics, so also asking for youtube.readonly was redundant - and Google's
+# OAuth verification rejects requests for scopes an app doesn't need. Accounts
+# connected before this change keep the readonly grant they already have.
+YT_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
 # force-ssl is a superset of youtube.upload (videos.insert accepts it too),
 # and is also what liveBroadcasts/liveStreams write operations require - see
 # app/services/live_stream.py. Accounts connected before this change need to
