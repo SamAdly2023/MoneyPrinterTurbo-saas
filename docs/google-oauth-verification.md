@@ -10,9 +10,11 @@ What this file covers: what is already fixed in the code and pages, the exact
 Google console steps, copy-paste answers for the scope justification, and a
 shot-by-shot script for the required demo video.
 
-> Not checked from here: the current status in the console (Testing vs In
-> production, which scopes are listed, whether `vidzone.live` is a verified
-> domain). Compare the "Console checklist" below against what you see.
+> Console state as read on 2026-10-21: publishing status **Testing**, user type External,
+> 5 of 100 test users, verification not started; Branding links and `vidzone.live`
+> authorized domain set, app name still `Vidzon-live`; only `youtube.force-ssl` listed
+> (sensitive, no restricted scopes). Not read: the OAuth client's redirect URIs and
+> whether `vidzone.live` is verified in Search Console. Compare the "Console checklist" below against what you see.
 > Google changes its console and review rules, so where Google's own
 > Verification Center lists something different, follow Google.
 
@@ -37,7 +39,7 @@ shot-by-shot script for the required demo video.
    add `vidzone.live` as a *Domain* property and add the DNS TXT record it gives you.
    Use the same Google account that owns the Cloud project. Google checks this.
 2. **Branding**
-   - App name: `Vidzy`
+   - App name: `Vidzy` (the console currently says `Vidzon-live`, which does not match the site)
    - User support email and developer contact email: an inbox you read (Google emails the reviewer questions here)
    - App logo: 120x120 PNG (`resource/public/logo-icon.png` can be resized)
    - App home page: `https://vidzone.live/`
@@ -49,7 +51,7 @@ shot-by-shot script for the required demo video.
    - Publishing status: click **Publish app** so it reads **In production**
      (this alone stops the 7-day expiry, but unverified apps still show the warning and are capped at 100 users).
 4. **Data access (scopes)** - add exactly one:
-   - `https://www.googleapis.com/auth/youtube.force-ssl` ("Manage your YouTube account")
+   - `https://www.googleapis.com/auth/youtube.force-ssl` (Google shows it as "See, edit, and permanently delete your YouTube videos, ratings, comments and captions" - sensitive, not restricted)
    - Remove `youtube.readonly` and anything else not needed.
 5. **Clients** - the Web client used by Vidzy must have this authorized redirect URI:
    - `https://vidzone.live/api/v1/saas/youtube/callback`
@@ -109,7 +111,7 @@ production, so the real flow is shown (before that, a listed test user works).
 | 1 | Open `https://vidzone.live/` (address bar visible). Scroll the landing page. | "Vidzy streams a creator's video to their own YouTube channel 24/7." |
 | 2 | Click the Privacy Policy link in the footer; scroll to "How Vidzy uses Google and YouTube user data" and the Limited Use box. | "This is our privacy policy and how we handle YouTube data." |
 | 3 | Log in, open the dashboard, click **YouTube** (Connect). | "I connect my channel." |
-| 4 | **Pause on Google's consent screen.** The URL (with `client_id`), the app name "Vidzy" and the requested permission must be readable. Click Allow. | "Google shows the app name and the one permission we request: manage your YouTube account." |
+| 4 | **Pause on Google's consent screen.** The URL (with `client_id`), the app name "Vidzy" and the requested permission must be readable. Click Allow. | "Google shows the app name and the one permission we request. Google words it broadly; we only use it to create and end live broadcasts, upload videos and thumbnails, and read channel and view counts." |
 | 5 | Back in Vidzy: the YouTube button now shows the channel name. | "Vidzy reads my channel name to show which channel is connected." |
 | 6 | Open **Streams**, create a stream from a video (Import from URL or From my videos). | "I choose the video to loop." |
 | 7 | Click **Go Live**. Switch to **YouTube Studio -> Go live** and show the new broadcast with its title and thumbnail. | "Vidzy created this live broadcast and its stream through the YouTube Live API." |
