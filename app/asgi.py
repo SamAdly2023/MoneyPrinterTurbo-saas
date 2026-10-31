@@ -31,6 +31,7 @@ from app.models.exception import HttpException
 from app.router import root_api_router
 from app.services import auth
 from app.utils import utils
+from app.utils.security_headers import SecurityHeadersMiddleware
 
 _PUBLIC_PATHS = {
     "/", "/login", "/logout", "/api/v1/auth/session", "/logo.svg", "/logo.png", "/logo-icon.png",
@@ -149,6 +150,11 @@ async def auth_gate(request: Request, call_next):
 
     request.state.user = user
     return _no_store(await call_next(request))
+
+
+# Added after auth_gate on purpose: the last middleware added is the outermost, so these headers
+# also land on auth_gate's own redirects and 401s.
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 @app.get("/", response_class=HTMLResponse)

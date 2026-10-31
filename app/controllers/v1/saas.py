@@ -30,7 +30,7 @@ import shutil
 from typing import Optional
 
 from fastapi import File, Path, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from loguru import logger
 from pydantic import BaseModel
 
@@ -1157,13 +1157,17 @@ async def paypal_webhook(request: Request):
     raw = await request.body()
     if not billing.verify_webhook_signature(dict(request.headers), raw):
         logger.warning("rejected a PayPal webhook with an invalid/unverifiable signature")
-        return utils.get_response(400, message="invalid signature")
+        # A real HTTP 400, not utils.get_response()'s "HTTP 200 with status 400 in the body": PayPal only
+        # retries (and flags in its dashboard) deliveries that fail at the HTTP level. Answering 200 to a
+        # rejected event would make a misconfigured webhook look healthy while subscriptions silently
+        # never update.
+        return JSONResponse(status_code=400, content=utils.get_response(400, message="invalid signature"))
     import json as _json
 
     try:
         event = _json.loads(raw)
     except Exception:  # noqa: BLE001
-        return utils.get_response(400, message="invalid payload")
+        return JSONResponse(status_code=400, content=utils.get_response(400, message="invalid payload"))
     billing.handle_webhook_event(event)
     return utils.get_response(200, {"received": True})
 
