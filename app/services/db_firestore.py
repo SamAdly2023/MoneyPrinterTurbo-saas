@@ -226,6 +226,11 @@ def set_streams_plan(uid: str, plan: str) -> None:
     db.collection("users").document(uid).update({"streams_plan": plan})
 
 
+def set_signup_visit(uid: str, visit: dict) -> None:
+    """First-touch attribution captured when the account was created (see visitors.signup_snapshot)."""
+    db.collection("users").document(uid).update({"signup_visit": visit})
+
+
 # ---------------------------------------------------------------------------
 # API keys (external platform access - see app/controllers/v1/external.py)
 # ---------------------------------------------------------------------------

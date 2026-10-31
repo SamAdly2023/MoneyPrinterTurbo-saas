@@ -172,7 +172,7 @@
         <input class="search" id="user-search" placeholder="Search by email…" />
       </div>
       <table>
-        <thead><tr><th>Email</th><th>Provider</th><th>Signed up</th><th>Jobs</th><th>Auto-mode</th><th>Rendering</th><th>Clipping</th><th>Credits</th><th>Role</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Email</th><th>Provider</th><th>Signed up</th><th>Came from</th><th>Jobs</th><th>Auto-mode</th><th>Rendering</th><th>Clipping</th><th>Credits</th><th>Role</th><th>Status</th><th></th></tr></thead>
         <tbody id="users-body"></tbody>
       </table>
       <div class="empty" id="users-empty" style="display:none">No users yet.</div>
@@ -300,6 +300,16 @@ async function loadEngine(){
   $("#autokill-toggle").className="btn"+(d.auto_killed?" danger":"");
 }
 
+function sourceLabel(v){
+  if(!v)return "-";
+  const ref=(v.referrer||"").replace(/^https?:\/\//,"").split("/")[0];
+  const bits=[(v.source_type||"Direct")+(ref?" ("+ref+")":"")];
+  if(v.utm_campaign)bits.push(v.utm_campaign);
+  const where=[v.city,v.country].filter(Boolean).join(", ");
+  if(where)bits.push(where);
+  return bits.join(" - ");
+}
+
 function renderUsers(){
   const q=($("#user-search").value||"").toLowerCase();
   const filtered=allUsers.filter(u=>!q||(u.email||"").toLowerCase().includes(q));
@@ -313,6 +323,7 @@ function renderUsers(){
       <td><a href="#" onclick="openVideos('${u.uid}','${esc(u.email)}');return false">${esc(u.email)}</a></td>
       <td class="muted">${esc(u.provider||"")}</td>
       <td class="muted">${fmtDate(u.created_at)}</td>
+      <td class="muted">${esc(sourceLabel(u.signup_visit))}</td>
       <td>${u.job_count||0}</td>
       <td><button class="btn sm" onclick="toggleAutoMode('${u.uid}',${!(u.profile&&u.profile.auto_mode)})">${u.profile&&u.profile.auto_mode?"ON":"off"}</button></td>
       <td><button class="btn sm" onclick="toggleFeature('${u.uid}','can_render',${u.can_render===false})">${u.can_render===false?"OFF":"ON"}</button></td>

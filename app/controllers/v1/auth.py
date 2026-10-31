@@ -16,16 +16,16 @@ from loguru import logger
 from pydantic import BaseModel
 
 from app.controllers.v1.base import new_router
-from app.services import auth, email, firestore_db
+from app.services import auth, email, firestore_db, visitors
 from app.utils import utils
 
 router = new_router()
 
 
-def _send_signup_emails(user_email: str, provider: str):
+def _send_signup_emails(user_email: str, provider: str, source: str = ""):
     try:
         email.send_welcome_email(user_email)
-        email.notify_admin_new_signup(user_email, provider)
+        email.notify_admin_new_signup(user_email, provider, source)
     except Exception as e:  # noqa: BLE001 - never let email issues surface to the user
         logger.warning(f"signup email dispatch failed for {user_email}: {e}")
 
@@ -33,6 +33,8 @@ def _send_signup_emails(user_email: str, provider: str):
 class SessionBody(BaseModel):
     id_token: str
     invite: str = ""
+    # The anonymous id the login page keeps in the visitor's browser (same one the pageview beacon uses).
+    visitor_id: str = ""
 
 
 @router.post("/auth/session", summary="Exchange a Firebase ID token for a session cookie")
@@ -56,8 +58,16 @@ def create_session(body: SessionBody):
         return utils.get_response(403, message="this account has been disabled")
 
     if is_new:
+        # First-touch attribution: remember which visit (source, campaign, landing page, place) produced this
+        # account. Only on creation, so a later sign-in from somewhere else can never overwrite it.
+        snap = visitors.signup_snapshot(body.visitor_id)
+        if snap:
+            try:
+                firestore_db.set_signup_visit(uid, snap)
+            except Exception as e:  # noqa: BLE001 - never fail a signup over analytics
+                logger.warning(f"could not save signup attribution for {uid}: {e}")
         threading.Thread(
-            target=_send_signup_emails, args=(user_email, provider), daemon=True
+            target=_send_signup_emails, args=(user_email, provider, visitors.describe_source(snap)), daemon=True
         ).start()
 
     response = JSONResponse(content=utils.get_response(200, {"uid": uid, "email": user_email}))

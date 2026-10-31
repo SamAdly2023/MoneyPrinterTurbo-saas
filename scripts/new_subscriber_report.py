@@ -121,7 +121,8 @@ def describe_visit(s: dict, indent: str = "      ") -> None:
     pv = pageviews(s["session_id"])
     if pv:
         print(f"{indent}pages    : " + " -> ".join(f"{p} ({fmt(t)[11:16]})" for p, t in pv[:10]))
-    print(f"{indent}visit    : {fmt(s.get('first_seen'))} to {fmt(s.get('last_seen'))}, {s.get('pageview_count', 0)} pageview(s)")
+    span = fmt(s.get("first_seen")) + (f" to {fmt(s.get('last_seen'))}" if s.get("last_seen") else "")
+    print(f"{indent}visit    : {span}, {s.get('pageview_count', 0)} pageview(s) before signing up")
 
 
 def report(user: dict, jobs: list, sessions: list) -> None:
@@ -170,7 +171,14 @@ def report(user: dict, jobs: list, sessions: list) -> None:
     if not mine:
         print("    none")
 
-    print("\n  WHERE THEY CAME FROM (best guess from timing - see note at the top of this script)")
+    recorded = user.get("signup_visit")
+    if recorded:
+        print("\n  WHERE THEY CAME FROM (recorded when they signed up - certain)")
+        describe_visit(recorded, indent="    ")
+        print()
+        return
+
+    print("\n  WHERE THEY CAME FROM (best guess from timing - this account predates signup tracking)")
     if not created:
         print("    no sign-up time recorded")
         return

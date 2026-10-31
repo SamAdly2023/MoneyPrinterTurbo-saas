@@ -114,10 +114,12 @@ function showError(msg){
 
 async function completeSignIn(user){
   const idToken = await user.getIdToken();
+  let visitorId = "";
+  try { visitorId = localStorage.getItem("vi_sid") || ""; } catch (e) {}
   const r = await fetch("/api/v1/auth/session", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({id_token: idToken, invite: inviteToken}),
+    body: JSON.stringify({id_token: idToken, invite: inviteToken, visitor_id: visitorId}),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || (j.status && j.status >= 400)) {

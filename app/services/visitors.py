@@ -105,6 +105,52 @@ def record_pageview(
     firestore_db.add_visitor_pageview(session_id, path, title)
 
 
+# Fields copied onto the user when they sign up. A copy (not just the id) so the attribution
+# survives even if the anonymous visitor session is later pruned.
+_SIGNUP_FIELDS = (
+    "source_type", "referrer", "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+    "landing_path", "device_type", "country", "region", "city", "isp", "first_seen", "pageview_count",
+)
+
+
+def signup_snapshot(session_id: str):
+    """What we know about the visit that produced a signup, or None if there is no usable visit.
+
+    session_id comes from the browser, so it is untrusted - but all it can do is pick which anonymous
+    visit gets attached to the caller's own new account, so the worst case is a wrong label on one user."""
+    session_id = (session_id or "").strip()[:100]
+    if not session_id:
+        return None
+    try:
+        session = firestore_db.get_visitor_session(session_id)
+    except Exception as e:  # noqa: BLE001 - attribution must never block a signup
+        logger.warning(f"signup attribution lookup failed: {e}")
+        return None
+    if not session:
+        return None
+    snap = {k: session.get(k) for k in _SIGNUP_FIELDS if session.get(k) not in (None, "")}
+    snap["session_id"] = session_id
+    return snap
+
+
+def describe_source(snap) -> str:
+    """One readable line, for the admin email: 'Organic search (google.com) - Tucson, United States, Mobile'."""
+    if not snap:
+        return "unknown (no visit recorded)"
+    ref = (snap.get("referrer") or "").replace("https://", "").replace("http://", "").split("/")[0]
+    parts = [snap.get("source_type") or "Direct"]
+    if ref:
+        parts[0] += f" ({ref})"
+    if snap.get("utm_campaign"):
+        parts.append(f"campaign: {snap['utm_campaign']}")
+    where = ", ".join(x for x in (snap.get("city"), snap.get("country")) if x)
+    if where:
+        parts.append(where)
+    if snap.get("device_type"):
+        parts.append(snap["device_type"])
+    return " - ".join(parts)
+
+
 def summarize(sessions: list) -> dict:
     total_sessions = len(sessions)
     total_pageviews = sum(s.get("pageview_count", 0) for s in sessions)

@@ -211,6 +211,7 @@ def notify_admin_new_purchase(user_email: str, description: str, amount_usd: flo
       <p style="margin:0;font-size:14px;color:{BRAND_TEXT};">
         <strong>{user_email}</strong> just paid <strong>${amount_usd:.2f}</strong> for <strong>{description}</strong>.
       </p>
+      {f'<p style="margin:12px 0 0;font-size:14px;color:{BRAND_TEXT};">Came from: <strong>{source}</strong></p>' if source else ""}
       <p style="margin:14px 0 0;font-size:12.5px;color:{BRAND_MUTED};">{now}</p>
       <div style="margin-top:22px;">
         <a href="{_base_url()}/admin" style="display:inline-block;background:{BRAND_PURPLE};
@@ -222,7 +223,7 @@ def notify_admin_new_purchase(user_email: str, description: str, amount_usd: flo
     return send_email(admin_email, f"New Vidzy purchase: {description} (${amount_usd:.2f})", _email_shell(inner))
 
 
-def notify_admin_new_signup(user_email: str, provider: str) -> bool:
+def notify_admin_new_signup(user_email: str, provider: str, source: str = "") -> bool:
     admin_email = _admin_notify_email()
     if not admin_email:
         return False

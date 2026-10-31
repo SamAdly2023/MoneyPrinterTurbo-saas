@@ -420,6 +420,11 @@ def set_streams_plan(uid: str, plan: str) -> None:
     _update_user(uid, {"streams_plan": plan})
 
 
+def set_signup_visit(uid: str, visit: dict) -> None:
+    """First-touch attribution captured when the account was created (see visitors.signup_snapshot)."""
+    _update_user(uid, {"signup_visit": visit})
+
+
 # ---------------------------------------------------------------------------
 # API keys
 # ---------------------------------------------------------------------------
