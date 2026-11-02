@@ -13,6 +13,12 @@ from app.services import state as sm
 from app.utils import file_security, utils
 
 
+def _fail(task_id, message: str) -> None:
+    """Mark the task failed WITH a reason that reaches the user (and the admin job list)."""
+    logger.error(message)
+    sm.state.update_task(task_id, state=const.TASK_STATE_FAILED, error=message)
+
+
 def generate_script(task_id, params):
     logger.info("\n\n## generating video script")
     video_script = params.video_script.strip()
@@ -28,8 +34,8 @@ def generate_script(task_id, params):
         logger.debug(f"video script: \n{video_script}")
 
     if not video_script:
-        sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
-        logger.error("failed to generate video script.")
+        _fail(task_id, "Couldn't write the script: the AI text service returned nothing. "
+                       "Check the LLM provider and its API key, and that it isn't rate-limited.")
         return None
 
     return video_script
@@ -60,8 +66,8 @@ def generate_terms(task_id, params, video_script):
         logger.debug(f"video terms: {utils.to_json(video_terms)}")
 
     if not video_terms:
-        sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
-        logger.error("failed to generate video terms.")
+        _fail(task_id, "Couldn't work out what footage to search for: the AI text service returned no "
+                       "keywords. Check the LLM provider and its API key.")
         return None
 
     # 可选的 TwelveLabs Marengo 语义重排：未启用时返回原顺序，无任何副作用。
@@ -150,7 +156,7 @@ def generate_audio(task_id, params, video_script):
             "custom audio file is invalid, "
             f"task_id: {task_id}, path: {requested_custom_audio_file}, error: {str(exc)}"
         )
-        sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+        _fail(task_id, "The custom audio file is invalid or missing.")
         return None, None, None
 
     if not custom_audio_file:
@@ -163,26 +169,19 @@ def generate_audio(task_id, params, video_script):
             voice_file=audio_file,
         )
         if sub_maker is None:
-            sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
-            logger.error(
-                """failed to generate audio:
-1. check if the language of the voice matches the language of the video script.
-2. check if the network is available. If you are in China, it is recommended to use a VPN and enable the global traffic mode.
-            """.strip()
-            )
+            _fail(task_id, "Couldn't generate the voice-over. Check that the chosen voice matches the "
+                           "script's language, and that the text-to-speech service is reachable.")
             return None, None, None
         audio_duration = math.ceil(voice.get_audio_duration(sub_maker))
         if audio_duration == 0:
-            sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
-            logger.error("failed to get audio duration.")
+            _fail(task_id, "The voice-over came out empty (zero length). Try a different voice or check the script text.")
             return None, None, None
         return audio_file, audio_duration, sub_maker
     else:
         logger.info(f"using custom audio file: {custom_audio_file}")
         audio_duration = voice.get_audio_duration(custom_audio_file)
         if audio_duration == 0:
-            sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
-            logger.error("failed to get audio duration from custom audio file.")
+            _fail(task_id, "The custom audio file has no usable audio.")
             return None, None, None
         return custom_audio_file, audio_duration, None
 
@@ -372,8 +371,11 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
 
     # 1. Generate script
     video_script = generate_script(task_id, params)
-    if not video_script or "Error: " in video_script:
-        sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+    if not video_script:
+        return  # generate_script already recorded why
+    if "Error: " in video_script:
+        # llm.generate_script returns the provider's error text as the "script" when a call fails
+        _fail(task_id, f"The AI text service reported an error: {video_script.strip()[:200]}")
         return
 
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=10)
@@ -389,8 +391,7 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
     if params.video_source not in ("local", "avatar"):
         video_terms = generate_terms(task_id, params, video_script)
         if not video_terms:
-            sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
-            return
+            return  # generate_terms already recorded why
 
     save_script_data(task_id, video_script, video_terms, params)
 
@@ -471,7 +472,8 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
     )
 
     if not final_video_paths:
-        sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+        _fail(task_id, "The video couldn't be assembled from the footage and voice-over. "
+                       "Try again; if it keeps failing, the server may be short on memory or processes.")
         return
 
     logger.success(

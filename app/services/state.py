@@ -48,6 +48,12 @@ class MemoryState(BaseState):
             progress = 100
 
         with self._lock:
+            # update_task REPLACES the record. A pipeline step records *why* it failed, then the caller marks
+            # the task failed again with no reason - which used to wipe that reason and leave only the generic
+            # "Generation failed" message. Keep an existing error when a failure update doesn't bring its own.
+            previous = self._tasks.get(task_id) or {}
+            if state == const.TASK_STATE_FAILED and "error" not in kwargs and previous.get("error"):
+                kwargs["error"] = previous["error"]
             self._tasks[task_id] = {
                 "task_id": task_id,
                 "state": state,
