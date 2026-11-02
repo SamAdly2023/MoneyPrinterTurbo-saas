@@ -1,7 +1,10 @@
 # Keep legacy pip install support; primary deps moved to pyproject.toml / uv.lock.
 moviepy==2.2.1
 streamlit==1.58.0
-edge_tts==7.2.7
+# edge-tts talks to Microsoft's free Edge read-aloud service, which changes its handshake from time to time.
+# 7.2.7 started failing (HTTP 403 -> every voice-over timed out after 30s -> "Generation failed"); 7.3.0 works.
+# If voice-overs start timing out again, try the newest edge-tts release first.
+edge_tts==7.3.0
 fastapi==0.136.3
 uvicorn==0.32.1
 openai==2.24.0

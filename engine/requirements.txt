@@ -1,7 +1,10 @@
 # Slim dependency set for the Engine exe - only what the render path imports
 # (no web server, database drivers, Firebase, or LLM SDKs beyond openai).
 moviepy==2.2.1
-edge_tts==7.2.7
+# edge-tts talks to Microsoft's free Edge read-aloud service, which changes its handshake from time to time.
+# 7.2.7 started failing (HTTP 403 -> every voice-over timed out after 30s -> "Generation failed"); 7.3.0 works.
+# If voice-overs start timing out again, try the newest edge-tts release first.
+edge_tts==7.3.0
 openai==2.24.0
 loguru==0.7.3
 requests==2.33.1
