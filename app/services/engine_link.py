@@ -156,6 +156,8 @@ def can_render_on_engine(params: dict) -> bool:
         return False
     if params.get("video_materials"):
         return False
+    if params.get("hero_clip"):  # generated through a paid server-side API
+        return False
     return True
 
 

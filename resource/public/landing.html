@@ -94,6 +94,10 @@
   .flow h4{margin:0 0 6px;font-size:14.5px}
   .flow p{margin:0;color:var(--muted);font-size:13px;line-height:1.55}
 
+  .price-h{font-size:15px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:30px 0 14px}
+  .card .price{font-size:30px;font-weight:800;margin:0 0 10px}
+  .card .price small{font-size:13px;font-weight:600;color:var(--muted)}
+  .price-note{color:var(--muted);font-size:12.5px;text-align:center;margin:22px 0 0;line-height:1.6}
   .cta{text-align:center;background:var(--panel);border:1px solid var(--border);border-radius:22px;padding:56px 32px}
   .cta h2{margin:0 0 12px;font-size:28px}
   .cta p{margin:0 0 28px;color:var(--muted)}
@@ -119,6 +123,7 @@
     <nav>
       <a class="brand" href="/"><img src="/logo-icon.png" alt="" />Vidzy</a>
       <div class="nav-actions">
+        <a class="btn hide-sm" href="#pricing">Pricing</a>
         <a class="btn hide-sm" href="/login">Log in</a>
         <a class="btn btn-primary" href="/login?signup=1">Sign Up Free</a>
       </div>
@@ -220,6 +225,22 @@
   </div>
 </section>
 
+<section id="pricing">
+  <div class="wrap">
+    <div class="section-head">
+      <h2>Simple pricing</h2>
+      <p>Start free. Upgrade only when you need more streams or more videos. Cancel any time.</p>
+    </div>
+    <h3 class="price-h">24/7 live streams</h3>
+    <div class="grid" id="price-streams">
+      <div class="card"><h3>Free</h3><div class="price">$0</div><p>1 live stream, up to 5 hours per broadcast. Your first stream is free - no card needed.</p></div>
+    </div>
+    <h3 class="price-h" id="price-video-h" style="display:none">AI short videos</h3>
+    <div class="grid" id="price-video"></div>
+    <p class="price-note" id="price-note"></p>
+  </div>
+</section>
+
 <section>
   <div class="wrap">
     <div class="cta">
@@ -235,6 +256,40 @@
   <div><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Service</a> · <a href="/data-deletion">Data deletion</a> · <a href="/login">Log in</a></div>
 </footer>
 <script>document.getElementById("y").textContent = new Date().getFullYear();</script>
+<script>
+(function(){
+  // Prices come from the same admin settings checkout uses, so this section can never go stale.
+  function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function money(n){return "$"+(Math.round(n*100)%100===0?Math.round(n):n.toFixed(2));}
+  fetch("/api/v1/public/pricing").then(function(r){return r.json();}).then(function(j){
+    var d=j.data||j;
+    if(!d||!d.live)return;
+    var streams=document.getElementById("price-streams");
+    (d.streams||[]).forEach(function(t){
+      if(t.id==="free")return;
+      var el=document.createElement("div");el.className="card";
+      el.innerHTML="<h3>"+esc(t.label)+"</h3><div class=\"price\">"+money(t.price_usd)+" <small>/ month</small></div>"+
+        "<p>"+esc(t.max_concurrent)+" live streams at once, no time limit per broadcast, automatic restart if a stream drops.</p>";
+      streams.appendChild(el);
+    });
+    var vp=d.video_plans||[];
+    if(vp.length){
+      document.getElementById("price-video-h").style.display="";
+      var grid=document.getElementById("price-video");
+      vp.forEach(function(p){
+        var el=document.createElement("div");el.className="card";
+        el.innerHTML="<h3>"+esc(p.label)+"</h3><div class=\"price\">"+money(p.price_usd)+" <small>/ month</small></div>"+
+          "<p>"+esc(p.credits)+" AI videos a month (about "+money(p.price_usd/p.credits)+" each), credits roll over."+(p.id==="pro"?" Includes Auto Mode.":"")+"</p>";
+        grid.appendChild(el);
+      });
+    }
+    var note=[];
+    if(d.credit_price_usd)note.push("Need just a few videos? Credits start at "+money(d.credit_price_usd)+" per video, no subscription.");
+    if(d.hero_clip&&d.hero_clip.enabled)note.push("Optional AI hero clip: a realistic AI-generated opening shot for +"+d.hero_clip.credits+" credit"+(d.hero_clip.credits===1?"":"s")+".");
+    document.getElementById("price-note").textContent=note.join(" ");
+  }).catch(function(){});
+})();
+</script>
 <script>
 (function(){
   // Anonymous pageview beacon for the admin-only Visitors tab. Uses

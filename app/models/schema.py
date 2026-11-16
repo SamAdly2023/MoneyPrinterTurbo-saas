@@ -127,6 +127,13 @@ class VideoParams(BaseModel):
     # user's own Profile photo, falling back to the admin's platform-wide
     # default - only used when video_source == "avatar".
     avatar_photo_path: Optional[str] = ""
+
+    # Optional AI "hero clip" opening shot (see app/services/hero_clip.py). hero_clip is the user's
+    # choice; hero_clip_cost is the extra credits reserved for it when the job was queued (stored so a
+    # later admin price change can't make the refund wrong); hero_clip_path is filled in by the pipeline.
+    hero_clip: bool = False
+    hero_clip_cost: int = 0
+    hero_clip_path: Optional[str] = ""
     paragraph_number: int = Field(default=1, ge=1, le=10)
     video_script_prompt: str = Field(default="", max_length=2000)
     custom_system_prompt: str = Field(default="", max_length=8000)

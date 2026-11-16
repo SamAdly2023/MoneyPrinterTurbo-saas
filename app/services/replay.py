@@ -75,8 +75,36 @@ def get_streams_plan(uid: str) -> str:
     return plan if plan in STREAMS_PLANS else DEFAULT_STREAMS_PLAN
 
 
+def effective_streams_plans() -> dict:
+    """STREAMS_PLANS with the admin's optional per-tier concurrent-stream override applied
+    (Settings -> streams_<tier>_max_concurrent). Unset keeps the numbers above, so changing a tier's
+    limit is a deliberate admin action, never a side effect of a code update."""
+    settings = firestore_db.get_global_settings()
+    plans = {}
+    for tier_id, tier in STREAMS_PLANS.items():
+        plan = dict(tier)
+        try:
+            override = int(settings.get(f"streams_{tier_id}_max_concurrent") or 0)
+        except (TypeError, ValueError):
+            override = 0
+        if override > 0:
+            plan["max_concurrent"] = override
+        plans[tier_id] = plan
+    return plans
+
+
 def get_streams_plan_limits(uid: str) -> dict:
-    return STREAMS_PLANS[get_streams_plan(uid)]
+    return effective_streams_plans()[get_streams_plan(uid)]
+
+
+def platform_live_stream_count() -> int:
+    """Real streams currently live across every account (for the optional platform-wide cap)."""
+    total = 0
+    for user in firestore_db.list_users():
+        for c in (user.get("profile") or {}).get("replay_channels") or []:
+            if c.get("is_real") and c.get("status") == STATUS_LIVE:
+                total += 1
+    return total
 
 ALLOWED_UPLOAD_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # a short "on-loop" source video, not a raw long-form upload
@@ -557,6 +585,16 @@ def go_live(uid: str, channel_id: str, force: bool = False) -> dict:
             raise ValueError(
                 f"your {limits['label']} plan allows {limits['max_concurrent']} concurrent "
                 f"stream(s) - stop another stream or upgrade your plan to go live with this one."
+            )
+        # Optional platform-wide ceiling (Settings -> streams_global_cap, 0/unset = no limit): the shared
+        # server can only push so many streams, so past it new go-lives wait instead of degrading everyone.
+        try:
+            global_cap = int(firestore_db.get_global_settings().get("streams_global_cap") or 0)
+        except (TypeError, ValueError):
+            global_cap = 0
+        if global_cap > 0 and platform_live_stream_count() >= global_cap:
+            raise ValueError(
+                "Vidzy is at its live-stream capacity right now - please try again in a little while."
             )
 
     if channel.get("is_real") and destination == "youtube":

@@ -258,6 +258,89 @@ def create_streams_subscription(uid: str, tier: str) -> dict:
     return _create_subscription(_streams_billing_plan_id(tier), f"{uid}:streams:{tier}")
 
 
+# --------------------------------------------------------------------------- #
+# Monthly video plans - recurring credits. Same PayPal Subscriptions API as the
+# plans above, one Billing Plan per tier. Credits are granted on every paid
+# cycle from the PAYMENT.SALE.COMPLETED webhook (never from the client), keyed
+# by the sale id so a retried webhook can't grant twice. Unused credits roll over
+# (they never expire, same as bought packs). custom_id is "uid:video:tier".
+#
+# Defaults are the launch pricing; both price and credits per tier are
+# admin-editable (Settings -> video_<tier>_price_usd / video_<tier>_credits).
+# --------------------------------------------------------------------------- #
+VIDEO_PLANS = {
+    "creator": {"label": "Creator", "credits": 25, "price": 15.0},
+    "pro": {"label": "Pro", "credits": 80, "price": 39.0},
+}
+
+
+def video_plan_price(tier: str) -> float:
+    return float(_global().get(f"video_{tier}_price_usd") or VIDEO_PLANS[tier]["price"])
+
+
+def video_plan_credits(tier: str) -> int:
+    return int(_global().get(f"video_{tier}_credits") or VIDEO_PLANS[tier]["credits"])
+
+
+def _video_billing_plan_id(tier: str) -> str:
+    plan_id = _global().get(f"paypal_video_{tier}_plan_id", "")
+    if not plan_id:
+        raise ValueError(
+            f"No PayPal Billing Plan is configured for the '{tier}' video plan yet. "
+            "Create one in the PayPal dashboard and paste its ID into Settings."
+        )
+    return plan_id
+
+
+def video_plan_available(tier: str) -> bool:
+    return bool(_global().get(f"paypal_video_{tier}_plan_id", ""))
+
+
+def create_video_subscription(uid: str, tier: str) -> dict:
+    if tier not in VIDEO_PLANS:
+        raise ValueError(f"unknown video plan: {tier}")
+    return _create_subscription(_video_billing_plan_id(tier), f"{uid}:video:{tier}")
+
+
+def _get_subscription(subscription_id: str) -> dict:
+    resp = requests.get(
+        f"{_api_base()}/v1/billing/subscriptions/{subscription_id}", headers=_headers(), timeout=30
+    )
+    if not resp.ok:
+        raise RuntimeError(f"PayPal subscription lookup failed ({resp.status_code}): {resp.text[:200]}")
+    return resp.json()
+
+
+def _parse_video_custom_id(custom_id: str):
+    """("uid", "tier") for a video-plan custom_id, else None."""
+    uid, sep, tier = (custom_id or "").partition(":video:")
+    return (uid, tier) if sep and uid and tier in VIDEO_PLANS else None
+
+
+def _handle_subscription_sale(resource: dict) -> None:
+    """A paid cycle of any subscription. Only video plans act on it: look the subscription up at PayPal
+    (server to server) to learn whose it is, then grant that cycle's credits once."""
+    sale_id = resource.get("id", "")
+    sub_id = resource.get("billing_agreement_id", "")
+    if not sale_id or not sub_id:
+        return  # not a subscription payment (credit packs are Orders, not Sales)
+    try:
+        parsed = _parse_video_custom_id(_get_subscription(sub_id).get("custom_id", ""))
+    except Exception as e:  # noqa: BLE001 - make PayPal retry the webhook rather than lose the credits
+        logger.error(f"could not look up subscription {sub_id} for sale {sale_id}: {e}")
+        raise
+    if not parsed:
+        return  # Auto Mode or Streams payment
+    uid, tier = parsed
+    credits = video_plan_credits(tier)
+    if firestore_db.record_payment_if_new(f"sale:{sale_id}", uid, credits):
+        logger.success(f"granted {credits} credits to {uid} for a '{tier}' video plan payment (sale {sale_id})")
+        amount = float((resource.get("amount") or {}).get("total") or video_plan_price(tier))
+        _notify_purchase(uid, f"{VIDEO_PLANS[tier]['label']} video plan - {credits} credits", amount)
+    else:
+        logger.info(f"sale {sale_id} already processed - no-op")
+
+
 def verify_webhook_signature(headers: dict, body: bytes) -> bool:
     """PayPal signs every webhook delivery; this calls PayPal's own
     verification endpoint rather than reimplementing signature checking,
@@ -298,9 +381,25 @@ def handle_webhook_event(event: dict) -> None:
     a Streams-plan subscription (see create_streams_subscription)."""
     event_type = event.get("event_type", "")
     resource = event.get("resource", {})
+    if event_type == "PAYMENT.SALE.COMPLETED":
+        _handle_subscription_sale(resource)  # monthly video-plan credits (sale events carry no custom_id)
+        return
     custom_id = resource.get("custom_id", "")
     if not custom_id:
         logger.info(f"unhandled PayPal webhook event: {event_type} (no custom_id)")
+        return
+
+    video = _parse_video_custom_id(custom_id)
+    if video:
+        v_uid, v_tier = video
+        if event_type == "BILLING.SUBSCRIPTION.ACTIVATED":
+            firestore_db.set_video_plan(v_uid, v_tier)
+            logger.success(f"video plan '{v_tier}' activated for {v_uid} (credits arrive with the payment event)")
+        elif event_type in ("BILLING.SUBSCRIPTION.CANCELLED", "BILLING.SUBSCRIPTION.SUSPENDED", "BILLING.SUBSCRIPTION.EXPIRED"):
+            firestore_db.set_video_plan(v_uid, "")
+            logger.info(f"video plan ended for {v_uid} ({event_type}); credits already granted stay")
+        else:
+            logger.info(f"unhandled PayPal webhook event: {event_type}")
         return
 
     uid, sep, rest = custom_id.partition(":streams:")

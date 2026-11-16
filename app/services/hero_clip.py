@@ -44,6 +44,26 @@ def _token() -> str:
     return token
 
 
+def is_enabled() -> bool:
+    """Admin switch (Settings). Off by default - nothing is offered or charged until it is turned on,
+    and it needs the Replicate token."""
+    s = firestore_db.get_global_settings()
+    return bool(s.get("hero_clip_enabled")) and bool((s.get("replicate_api_token") or "").strip())
+
+
+def credit_cost() -> int:
+    """Extra credits a hero clip costs on top of the video's own 1 credit (admin-adjustable)."""
+    try:
+        return max(0, int(firestore_db.get_global_settings().get("hero_clip_credits", 1)))
+    except (TypeError, ValueError):
+        return 1
+
+
+def configured_resolution() -> str:
+    res = str(firestore_db.get_global_settings().get("hero_clip_resolution") or "480p")
+    return res if res in ("480p", "720p") else "480p"
+
+
 def build_prompt(subject: str, opening: str = "") -> str:
     """A short visual prompt for the clip. Asks the configured LLM; falls back to a plain template so a
     flaky text service never blocks the clip."""

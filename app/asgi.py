@@ -36,6 +36,8 @@ from app.utils.security_headers import SecurityHeadersMiddleware
 _PUBLIC_PATHS = {
     "/", "/login", "/logout", "/api/v1/auth/session", "/logo.svg", "/logo.png", "/logo-icon.png",
     "/privacy", "/terms", "/data-deletion", "/robots.txt", "/sitemap.xml", "/manifest.json",
+    # Prices for the landing page's pricing section (read from the same admin settings the dashboard uses).
+    "/api/v1/public/pricing",
     # Anonymous visitor pageview beacon fired from the public marketing pages.
     "/api/v1/track/pageview",
     # PayPal's server calling us directly - no browser session cookie exists.
@@ -168,6 +170,46 @@ async def root_page(request: Request):
 @app.get("/login", response_class=HTMLResponse)
 async def login_page():
     return _read_public_html("login.html")
+
+
+_pricing_cache = {"at": 0.0, "data": None}
+
+
+@app.get("/api/v1/public/pricing")
+async def public_pricing():
+    """What the landing page's pricing section shows. Everything comes from the admin settings, so the
+    public page can never disagree with what checkout charges. Cached for a minute (public, no auth)."""
+    import time
+
+    if _pricing_cache["data"] is not None and time.time() - _pricing_cache["at"] < 60:
+        return utils.get_response(200, _pricing_cache["data"])
+    data = {"live": False, "streams": [], "video_plans": [], "credit_price_usd": 0}
+    try:
+        from app.services import billing, firestore_db, hero_clip, replay
+
+        if billing.live_billing_enabled():
+            data["live"] = True
+            data["credit_price_usd"] = float(firestore_db.get_global_settings().get("credit_price_usd") or 0.75)
+            for tier_id, tier in replay.effective_streams_plans().items():
+                price = 0.0 if tier_id == "free" else billing.streams_plan_price(tier_id)
+                if tier_id != "free" and price <= 0:
+                    continue
+                data["streams"].append({
+                    "id": tier_id, "label": tier["label"], "max_concurrent": tier["max_concurrent"],
+                    "max_duration_hours": tier["max_duration_hours"], "price_usd": price,
+                })
+            for tier_id, plan in billing.VIDEO_PLANS.items():
+                if billing.video_plan_available(tier_id):
+                    data["video_plans"].append({
+                        "id": tier_id, "label": plan["label"], "credits": billing.video_plan_credits(tier_id),
+                        "price_usd": billing.video_plan_price(tier_id),
+                    })
+            data["hero_clip"] = {"enabled": hero_clip.is_enabled(), "credits": hero_clip.credit_cost()}
+    except Exception as e:  # noqa: BLE001 - the landing page must still render without prices
+        logger.warning(f"public pricing unavailable: {e}")
+        return utils.get_response(200, {"live": False, "streams": [], "video_plans": [], "credit_price_usd": 0})
+    _pricing_cache.update(at=time.time(), data=data)
+    return utils.get_response(200, data)
 
 
 @app.get("/data-deletion", response_class=HTMLResponse)

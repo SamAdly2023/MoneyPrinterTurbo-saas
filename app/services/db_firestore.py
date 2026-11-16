@@ -226,6 +226,11 @@ def set_streams_plan(uid: str, plan: str) -> None:
     db.collection("users").document(uid).update({"streams_plan": plan})
 
 
+def set_video_plan(uid: str, plan: str) -> None:
+    """Monthly video plan ("creator"/"pro", or "" for none) - see billing.VIDEO_PLANS."""
+    db.collection("users").document(uid).update({"video_plan": plan})
+
+
 def set_signup_visit(uid: str, visit: dict) -> None:
     """First-touch attribution captured when the account was created (see visitors.signup_snapshot)."""
     db.collection("users").document(uid).update({"signup_visit": visit})

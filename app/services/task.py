@@ -8,7 +8,7 @@ from loguru import logger
 from app.config import config
 from app.models import const
 from app.models.schema import VideoConcatMode, VideoParams
-from app.services import ai_visuals, avatar, llm, material, subtitle, twelvelabs, video, voice, upload_post
+from app.services import ai_visuals, avatar, hero_clip, llm, material, subtitle, twelvelabs, video, voice, upload_post
 from app.services import state as sm
 from app.utils import file_security, utils
 
@@ -298,6 +298,29 @@ def get_video_materials(task_id, params, video_terms, audio_duration, audio_path
         return downloaded_videos
 
 
+def add_hero_clip(task_id, params, video_script, downloaded_videos):
+    """Optional paid extra: an AI-generated opening shot (see hero_clip.py). Never fatal - if anything
+    goes wrong the video renders with stock footage only, params.hero_clip_path stays empty, and the
+    caller sees hero_clip_used=False in the result and refunds the extra credits."""
+    try:
+        logger.info("\n\n## generating AI hero clip")
+        opening = (video_script or "").strip().split(".")[0][:200]
+        prompt = hero_clip.build_prompt(params.video_subject, opening)
+        logger.info(f"hero clip prompt: {prompt}")
+        res = hero_clip.generate_hero_clip(
+            prompt,
+            path.join(utils.task_dir(task_id), "hero.mp4"),
+            aspect=str(getattr(params.video_aspect, "value", params.video_aspect)),
+            resolution=hero_clip.configured_resolution(),
+        )
+        params.hero_clip_path = res["path"]
+        return [res["path"]] + list(downloaded_videos)
+    except Exception as e:  # noqa: BLE001 - a hero clip must never fail the whole video
+        logger.error(f"hero clip skipped: {type(e).__name__}: {e}")
+        params.hero_clip_path = ""
+        return downloaded_videos
+
+
 def generate_final_videos(
     task_id, params, downloaded_videos, audio_file, subtitle_path
 ):
@@ -340,6 +363,7 @@ def generate_final_videos(
                 video_transition_mode=video_transition_mode,
                 max_clip_duration=params.video_clip_duration,
                 threads=params.n_threads,
+                first_clip=params.hero_clip_path or "",
             )
 
         _progress += 50 / params.video_count / 2
@@ -449,6 +473,9 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
         sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
         return
 
+    if params.hero_clip and params.video_source != "avatar":
+        downloaded_videos = add_hero_clip(task_id, params, video_script, downloaded_videos)
+
     if stop_at == "materials":
         sm.state.update_task(
             task_id,
@@ -524,6 +551,8 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
         "subtitle_path": subtitle_path,
         "materials": downloaded_videos,
         "cross_post_results": cross_post_results if cross_post_results else None,
+        # False when a hero clip was paid for but couldn't be made - the caller refunds it.
+        "hero_clip_used": bool(params.hero_clip_path),
     }
     sm.state.update_task(
         task_id, state=const.TASK_STATE_COMPLETE, progress=100, **kwargs

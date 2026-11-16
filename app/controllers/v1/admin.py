@@ -85,8 +85,25 @@ def _settings_response(settings: dict) -> dict:
         "streams_starter_price_usd": settings.get("streams_starter_price_usd", 9.0),
         "paypal_streams_pro_plan_id": settings.get("paypal_streams_pro_plan_id", ""),
         "streams_pro_price_usd": settings.get("streams_pro_price_usd", 29.0),
+        # Optional stream limits: per-tier concurrent override (0 = keep the built-in number) and a
+        # platform-wide cap on live streams (0 = none) - see replay.effective_streams_plans.
+        "streams_free_max_concurrent": settings.get("streams_free_max_concurrent", 0),
+        "streams_starter_max_concurrent": settings.get("streams_starter_max_concurrent", 0),
+        "streams_pro_max_concurrent": settings.get("streams_pro_max_concurrent", 0),
+        "streams_global_cap": settings.get("streams_global_cap", 0),
+        # Monthly video plans (billing.VIDEO_PLANS) - recurring credits, one PayPal Billing Plan per tier.
+        "paypal_video_creator_plan_id": settings.get("paypal_video_creator_plan_id", ""),
+        "video_creator_price_usd": settings.get("video_creator_price_usd", 15.0),
+        "video_creator_credits": settings.get("video_creator_credits", 25),
+        "paypal_video_pro_plan_id": settings.get("paypal_video_pro_plan_id", ""),
+        "video_pro_price_usd": settings.get("video_pro_price_usd", 39.0),
+        "video_pro_credits": settings.get("video_pro_credits", 80),
         "publish_base_url": settings.get("publish_base_url", "http://localhost:8080"),
         "replicate_api_token": settings.get("replicate_api_token", ""),
+        # AI hero clip (app/services/hero_clip.py) - off until switched on here; needs the Replicate token.
+        "hero_clip_enabled": bool(settings.get("hero_clip_enabled", False)),
+        "hero_clip_credits": settings.get("hero_clip_credits", 1),
+        "hero_clip_resolution": settings.get("hero_clip_resolution", "480p"),
         "avatar_image_path": settings.get("avatar_image_path", ""),
         # Transactional email (welcome email + admin new-signup alerts)
         "smtp_host": settings.get("smtp_host", ""),
@@ -142,8 +159,21 @@ class SettingsBody(BaseModel):
     streams_starter_price_usd: Optional[float] = None
     paypal_streams_pro_plan_id: Optional[str] = None
     streams_pro_price_usd: Optional[float] = None
+    streams_free_max_concurrent: Optional[int] = None
+    streams_starter_max_concurrent: Optional[int] = None
+    streams_pro_max_concurrent: Optional[int] = None
+    streams_global_cap: Optional[int] = None
+    paypal_video_creator_plan_id: Optional[str] = None
+    video_creator_price_usd: Optional[float] = None
+    video_creator_credits: Optional[int] = None
+    paypal_video_pro_plan_id: Optional[str] = None
+    video_pro_price_usd: Optional[float] = None
+    video_pro_credits: Optional[int] = None
     publish_base_url: Optional[str] = None
     replicate_api_token: Optional[str] = None
+    hero_clip_enabled: Optional[bool] = None
+    hero_clip_credits: Optional[int] = None
+    hero_clip_resolution: Optional[str] = None
     smtp_host: Optional[str] = None
     smtp_port: Optional[int] = None
     smtp_username: Optional[str] = None

@@ -98,5 +98,6 @@ def get_current_user(request: Request) -> dict | None:
         "credits": int(user.get("credits", 0)),
         "auto_mode_subscription_active": bool(user.get("auto_mode_subscription_active")),
         "streams_plan": user.get("streams_plan") or "free",
+        "video_plan": user.get("video_plan") or "",
         "live_billing_enabled": billing.live_billing_enabled(),
     }

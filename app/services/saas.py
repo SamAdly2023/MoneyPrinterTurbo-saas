@@ -85,7 +85,8 @@ def auto_mode_available(uid: str = None) -> bool:
         # "not available" rather than leaking a stale global answer.
         return False
     user = firestore_db.get_user(uid)
-    return bool((user or {}).get("auto_mode_subscription_active"))
+    # The Pro monthly video plan includes Auto Mode (it used to be a separate $29/month add-on).
+    return bool((user or {}).get("auto_mode_subscription_active")) or (user or {}).get("video_plan") == "pro"
 
 STATUS_PENDING = "pending"
 STATUS_PROCESSING = "processing"
@@ -868,7 +869,15 @@ class Engine:
             logger.error(f"auto-mode generation failed for {uid}: {e}")
             return False
 
-    def _refund_job_credit(self, uid: str, job_id: str) -> None:
+    @staticmethod
+    def _hero_cost(params: dict) -> int:
+        """Extra credits reserved for this job's AI hero clip (0 when it has none)."""
+        try:
+            return max(0, int((params or {}).get("hero_clip_cost") or 0)) if (params or {}).get("hero_clip") else 0
+        except (TypeError, ValueError):
+            return 0
+
+    def _refund_job_credit(self, uid: str, job_id: str, params: dict = None) -> None:
         """Every job - manual, retried, auto-generated, or one clip out of a
         batch - spends exactly 1 credit at queue time (queue_clip_jobs
         reserves a whole batch in one call, but that's N x "1 credit per
@@ -876,8 +885,9 @@ class Engine:
         the local desktop app, where nothing was ever reserved."""
         if not billing.live_billing_enabled():
             return
-        firestore_db.refund_credits(uid, 1)
-        logger.info(f"refunded 1 credit to {uid} for failed job {job_id}")
+        amount = 1 + self._hero_cost(params)  # a failed job also gives back its hero-clip credits
+        firestore_db.refund_credits(uid, amount)
+        logger.info(f"refunded {amount} credit(s) to {uid} for failed job {job_id}")
 
     def _process(self, uid: str, job: dict):
         job_id = job["id"]
@@ -902,7 +912,7 @@ class Engine:
         except Exception as e:
             logger.error(f"invalid params for job {job_id}: {e}")
             store.update(uid, job_id, status=STATUS_FAILED, error=f"Invalid parameters: {e}")
-            self._refund_job_credit(uid, job_id)
+            self._refund_job_credit(uid, job_id, job.get("params"))
             return
 
         sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=0)
@@ -940,8 +950,13 @@ class Engine:
             )
             store.update(uid, job_id, status=STATUS_FAILED, error=msg)
             logger.error(f"job {job_id} failed: {msg}")
-            self._refund_job_credit(uid, job_id)
+            self._refund_job_credit(uid, job_id, job.get("params"))
         else:
+            hero_cost = self._hero_cost(job.get("params"))
+            if hero_cost and not result.get("hero_clip_used") and billing.live_billing_enabled():
+                # The video rendered, only the paid AI opening shot couldn't be made: give back just that.
+                firestore_db.refund_credits(uid, hero_cost)
+                logger.info(f"refunded {hero_cost} hero-clip credit(s) to {uid} (job {job_id} rendered without it)")
             urls = _collect_outputs(job_id, task_id, result)
             final_script = result.get("script", "") or job["params"].get("video_script", "")
             self.finalize_job(uid, job, urls, final_script)

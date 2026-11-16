@@ -723,6 +723,7 @@ def combine_videos(
     video_transition_mode: VideoTransitionMode = None,
     max_clip_duration: int = 5,
     threads: int = 2,
+    first_clip: str = "",
 ) -> str:
     audio_clip = AudioFileClip(audio_file)
     try:
@@ -789,7 +790,14 @@ def combine_videos(
         subclipped_items=subclipped_items,
         concat_mode=video_concat_mode,
     )
-        
+
+    # An AI hero clip always opens the video: pin its first segment to the front (random mode
+    # shuffles everything else) and drop its other segments so it appears exactly once.
+    if first_clip:
+        pinned = next((c for c in subclipped_items if c.file_path == first_clip), None)
+        if pinned is not None:
+            subclipped_items = [pinned] + [c for c in subclipped_items if c.file_path != first_clip]
+
     logger.debug(f"total subclipped items: {len(subclipped_items)}")
     
     # Add downloaded clips over and over until the duration of the audio (max_duration) has been reached

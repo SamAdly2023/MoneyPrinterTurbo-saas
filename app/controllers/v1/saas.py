@@ -36,7 +36,7 @@ from pydantic import BaseModel
 
 from app.controllers.v1.base import new_router
 from app.models.schema import MaterialInfo, VideoParams
-from app.services import auth, billing, clips, engine_link, firestore_db, llm, publish, replay, saas
+from app.services import auth, billing, clips, engine_link, firestore_db, hero_clip, llm, publish, replay, saas
 from app.utils import utils
 
 router = new_router()
@@ -320,6 +320,13 @@ class JobBody(BaseModel):
     # rel_paths returned by POST /saas/materials/upload - your own photos/videos
     # used as this job's visuals instead of stock/AI/avatar (see "My Media").
     video_materials: Optional[list] = None
+    # Optional paid extra: an AI-generated opening shot (see app/services/hero_clip.py).
+    hero_clip: Optional[bool] = False
+
+
+def _hero_extra(body: JobBody) -> int:
+    """Extra credits this request needs for its hero clip (0 when not asked for / not offered)."""
+    return hero_clip.credit_cost() if (body.hero_clip and hero_clip.is_enabled()) else 0
 
 
 def _build_params(global_settings: dict, body: JobBody, profile: dict = None) -> dict:
@@ -381,9 +388,16 @@ def _build_params(global_settings: dict, body: JobBody, profile: dict = None) ->
         "contact_website": contact_website,
         "contact_phone": contact_phone,
         "avatar_photo_path": avatar_photo_path,
+        "hero_clip": bool(body.hero_clip and hero_clip.is_enabled()),
+        "hero_clip_cost": _hero_extra(body),
     }
     # Validate against the real schema; raises on bad input.
     return VideoParams(**raw).model_dump()
+
+
+@router.get("/saas/hero-clip", summary="Is the paid AI hero-clip extra on offer, and what does it cost?")
+def hero_clip_offer(request: Request):  # noqa: ARG001
+    return utils.get_response(200, {"enabled": hero_clip.is_enabled(), "credits": hero_clip.credit_cost()})
 
 
 @router.get("/saas/jobs", summary="List this user's jobs")
@@ -407,7 +421,11 @@ def list_jobs(request: Request):
 def create_job(request: Request, body: JobBody):
     if (denied := _blocked(request, "can_render", "Video rendering")) is not None:
         return denied
-    if (denied := _require_credits(request, 1)) is not None:
+    if body.hero_clip and not hero_clip.is_enabled():
+        return utils.get_response(400, message="The AI hero clip isn't available right now.")
+    if body.video_source == "avatar" and body.hero_clip:
+        return utils.get_response(400, message="The AI hero clip can't be combined with the AI presenter.")
+    if (denied := _require_credits(request, 1 + _hero_extra(body))) is not None:
         return denied
     if not body.video_subject.strip():
         return utils.get_response(400, message="video_subject is required")
@@ -1115,7 +1133,7 @@ def list_streams_plans(request: Request):
             "max_duration_hours": tier["max_duration_hours"],
             "price_usd": billing.streams_plan_price(tier_id) if billing.live_billing_enabled() else 0,
         }
-        for tier_id, tier in replay.STREAMS_PLANS.items()
+        for tier_id, tier in replay.effective_streams_plans().items()
     ]
     return utils.get_response(200, {
         "tiers": tiers,
@@ -1141,6 +1159,51 @@ def streams_subscribe(request: Request, body: StreamsSubscribeBody):
         return utils.get_response(400, message=str(e))
     except Exception as e:  # noqa: BLE001
         logger.error(f"PayPal Streams subscription creation failed for {uid} ({body.tier}): {e}")
+        return utils.get_response(502, message=f"PayPal error: {e}")
+    approve_url = next(
+        (link["href"] for link in sub.get("links", []) if link.get("rel") == "approve"), ""
+    )
+    return utils.get_response(200, {"subscription_id": sub.get("id", ""), "approve_url": approve_url})
+
+
+@router.get("/saas/video-plans", summary="Monthly video plans (recurring credits) and the caller's current one")
+def list_video_plans(request: Request):
+    uid = _uid(request)
+    live = billing.live_billing_enabled()
+    tiers = [
+        {
+            "id": tier_id,
+            "label": plan["label"],
+            "credits": billing.video_plan_credits(tier_id),
+            "price_usd": billing.video_plan_price(tier_id),
+            # Offered only once the admin has created its PayPal Billing Plan - until then the card says so.
+            "available": live and billing.video_plan_available(tier_id),
+        }
+        for tier_id, plan in billing.VIDEO_PLANS.items()
+    ]
+    return utils.get_response(200, {
+        "tiers": tiers,
+        "current_plan": (firestore_db.get_user(uid) or {}).get("video_plan") or "",
+    })
+
+
+class VideoPlanSubscribeBody(BaseModel):
+    tier: str
+
+
+@router.post("/saas/video-plans/subscribe", summary="Start a PayPal subscription for a monthly video plan")
+def video_plan_subscribe(request: Request, body: VideoPlanSubscribeBody):
+    if not billing.live_billing_enabled():
+        return utils.get_response(400, message="Subscriptions are only sold on the hosted site.")
+    if body.tier not in billing.VIDEO_PLANS:
+        return utils.get_response(400, message=f"unknown plan: {body.tier}")
+    uid = _uid(request)
+    try:
+        sub = billing.create_video_subscription(uid, body.tier)
+    except ValueError as e:
+        return utils.get_response(400, message=str(e))
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"PayPal video-plan subscription creation failed for {uid} ({body.tier}): {e}")
         return utils.get_response(502, message=f"PayPal error: {e}")
     approve_url = next(
         (link["href"] for link in sub.get("links", []) if link.get("rel") == "approve"), ""
