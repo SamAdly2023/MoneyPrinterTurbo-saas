@@ -438,7 +438,30 @@ def tts(
         else:
             logger.error(f"Invalid chatterbox voice name format: {voice_name}")
             return None
-    return azure_tts_v1(text, voice_name, voice_rate, voice_file)
+    result = azure_tts_v1(text, voice_name, voice_rate, voice_file)
+    if result is None:
+        result = _fallback_voice(text, voice_name, voice_rate, voice_file, voice_volume)
+    return result
+
+
+# Gemini voices used when Microsoft's free read-aloud service (edge-tts) fails. It is an unofficial
+# service that has already broken twice and also fails intermittently (timeouts, "no audio received"),
+# and every video needs a voice-over, so a second provider turns an outage into a slightly different voice.
+_FALLBACK_GEMINI_VOICES = {"Male": "Puck", "Female": "Kore"}
+
+
+def _fallback_voice(
+    text: str, voice_name: str, voice_rate: float, voice_file: str, voice_volume: float
+) -> Union[SubMaker, None]:
+    if not (config.app.get("gemini_api_key", "") or "").strip():
+        return None  # no fallback configured (Settings -> Fallback voice)
+    gender = "Female" if str(voice_name).rstrip().endswith("Female") else "Male"
+    voice = _FALLBACK_GEMINI_VOICES[gender]
+    logger.warning(f"edge-tts failed - falling back to Gemini voice {voice} ({gender})")
+    sub_maker = gemini_tts(text, voice, voice_rate, voice_file, voice_volume)
+    if sub_maker is not None:
+        logger.success("fallback voice-over generated with Gemini")
+    return sub_maker
 
 
 def convert_rate_to_percent(rate: float) -> str:
@@ -1032,51 +1055,44 @@ def gemini_tts(
     import base64
     import io
     from pydub import AudioSegment
-    import google.generativeai as genai
     _configure_pydub_ffmpeg(AudioSegment)
-    
+
     try:
-        # 配置Gemini API
-        api_key = config.app.get("gemini_api_key", "")
+        api_key = (config.app.get("gemini_api_key", "") or "").strip()
         if not api_key:
             logger.error("Gemini API key is not set")
             return None
-            
-        genai.configure(api_key=api_key)
-        
+
         logger.info(f"start, voice name: {voice_name}, try: 1")
-        
-        # 使用Gemini TTS API
-        model = genai.GenerativeModel("gemini-2.5-flash-preview-tts")
-        
-        generation_config = {
-            "response_modalities": ["AUDIO"],
-            "speech_config": {
-                "voice_config": {
-                    "prebuilt_voice_config": {
-                        "voice_name": voice_name
-                    }
-                }
-            }
-        }
-        
-        response = model.generate_content(
-            contents=text,
-            generation_config=generation_config
+
+        # Plain HTTPS call instead of the google-generativeai package, which is not installed on the
+        # server (and is heavy for a shared host). Model name is overridable because Google retires
+        # "preview" models: set gemini_tts_model in config.toml [app] if this one stops answering.
+        model_name = config.app.get("gemini_tts_model", "") or "gemini-2.5-flash-preview-tts"
+        resp = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
+            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+            json={
+                "contents": [{"parts": [{"text": text}]}],
+                "generationConfig": {
+                    "responseModalities": ["AUDIO"],
+                    "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice_name}}},
+                },
+            },
+            timeout=90,
         )
-        
-        # 检查响应
-        if not response.candidates or not response.candidates[0].content:
-            logger.error("No audio content received from Gemini TTS")
+        if not resp.ok:
+            logger.error(f"Gemini TTS HTTP {resp.status_code}: {resp.text[:300]}")
             return None
-            
-        # 获取音频数据
-        audio_data = None
-        for part in response.candidates[0].content.parts:
-            if hasattr(part, 'inline_data') and part.inline_data:
-                audio_data = part.inline_data.data
-                break
-                
+
+        candidates = resp.json().get("candidates") or []
+        parts = ((candidates[0].get("content") or {}).get("parts") or []) if candidates else []
+        audio_data = next(
+            ((p.get("inlineData") or p.get("inline_data") or {}).get("data") for p in parts
+             if p.get("inlineData") or p.get("inline_data")),
+            None,
+        )
+
         if not audio_data:
             logger.error("No audio data found in response")
             return None

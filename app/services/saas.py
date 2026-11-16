@@ -98,6 +98,7 @@ APP_STR_KEYS = {
     "video_source", "ai_visual_style", "auto_topic_template", "extra_token", "llm_provider",
     "groq_api_key", "groq_model_name", "grok_api_key", "grok_model_name",
     "openai_api_key", "openai_base_url", "openai_model_name",
+    "gemini_api_key",  # fallback voice-over when edge-tts fails (voice.py _fallback_voice)
     "youtube_client_id", "youtube_client_secret",
     "tiktok_client_key", "tiktok_client_secret",
     "facebook_app_id", "facebook_app_secret",

@@ -704,6 +704,10 @@
           <div class="field"><label>Grok model</label><input id="s-grok-model" placeholder="grok-4.3" /></div>
         </div>
 
+        <div class="section-title">Fallback voice-over</div>
+        <p class="hint">Voice-overs normally come from Microsoft's free read-aloud service, which is unofficial and sometimes stops answering (every video then fails). Add a Google Gemini API key (free to create at aistudio.google.com) and Vidzy automatically switches to a Gemini voice only when Microsoft's service fails. Leave empty for no fallback.</p>
+        <div class="field"><label>Gemini API key</label><input id="s-gemini-key" placeholder="AIza…" /></div>
+
         <div class="section-title">Default video options</div>
         <div class="grid2">
           <div class="field"><label>Aspect ratio</label>
@@ -1849,6 +1853,7 @@ async function loadSettings(){
     $("#s-ai-style-wrap").style.display=$("#s-source").value==="ai"?"block":"none";
     toggleAvatarSection();
     $("#s-replicate-token").value=s.replicate_api_token||"";
+    $("#s-gemini-key").value=s.gemini_api_key||"";
     $("#s-hero-on").checked=!!s.hero_clip_enabled;
     $("#s-hero-credits").value=s.hero_clip_credits??1;
     $("#s-hero-res").value=s.hero_clip_resolution||"480p";
@@ -1926,6 +1931,7 @@ $("#save-settings").onclick=async()=>{
     video_source:$("#s-source").value,
     ai_visual_style:$("#s-ai-style").value.trim(),
     replicate_api_token:$("#s-replicate-token").value.trim(),
+    gemini_api_key:$("#s-gemini-key").value.trim(),
     hero_clip_enabled:$("#s-hero-on").checked,
     hero_clip_credits:Math.max(0,parseInt($("#s-hero-credits").value,10)||0),
     hero_clip_resolution:$("#s-hero-res").value,

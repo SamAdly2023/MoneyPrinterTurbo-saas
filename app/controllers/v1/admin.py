@@ -100,6 +100,7 @@ def _settings_response(settings: dict) -> dict:
         "video_pro_credits": settings.get("video_pro_credits", 80),
         "publish_base_url": settings.get("publish_base_url", "http://localhost:8080"),
         "replicate_api_token": settings.get("replicate_api_token", ""),
+        "gemini_api_key": settings.get("gemini_api_key", ""),
         # AI hero clip (app/services/hero_clip.py) - off until switched on here; needs the Replicate token.
         "hero_clip_enabled": bool(settings.get("hero_clip_enabled", False)),
         "hero_clip_credits": settings.get("hero_clip_credits", 1),
@@ -171,6 +172,7 @@ class SettingsBody(BaseModel):
     video_pro_credits: Optional[int] = None
     publish_base_url: Optional[str] = None
     replicate_api_token: Optional[str] = None
+    gemini_api_key: Optional[str] = None
     hero_clip_enabled: Optional[bool] = None
     hero_clip_credits: Optional[int] = None
     hero_clip_resolution: Optional[str] = None
